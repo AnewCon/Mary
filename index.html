@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>平台管理面板</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 24px;
+            font-size: 28px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        h1::before {
+            content: "✨ ";
+        }
+
+        h1::after {
+            content: " ";
+        }
+
+        .balance-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 20px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 24px rgba(240,147,255,0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+
+        .balance-label {
+            color: rgba(255,255,255,0.9);
+            font-size: 14px;
+        }
+
+        .balance-value {
+            color: white;
+            font-size: 32px;
+            font-weight: 700;
+        }
+
+        .balance-unit {
+            color: rgba(255,255,255,0.9);
+            font-size: 16px;
+            margin-left: 4px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .card h2 {
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        label {
+            display: block;
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #eee;
+            border-radius: 12px;
+            font-size: 14px;
+            transition: all 0.2s;
+            background: #f8f9fa;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(102,126,234,0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+
+        .btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-green {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+
+        .btn-green:hover {
+            box-shadow: 0 4px 12px rgba(56,239,125,0.4);
+        }
+
+        .btn-green:disabled {
+            background: #ccc;
+        }
+
+        .btn-orange {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .btn-orange:hover {
+            box-shadow: 0 4px 12px rgba(245,87,108,0.4);
+        }
+
+        .btn-orange:disabled {
+            background: #ccc;
+        }
+
+        .result {
+            margin-top: 14px;
+            padding: 14px;
+            border-radius: 12px;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .result.show {
+            display: block;
+        }
+
+        .result.success {
+            background: #e8f8f0;
+            border: 1px solid #a8e6cf;
+        }
+
+        .result.error {
+            background: #ffe8e8;
+            border: 1px solid #ffb3b3;
+        }
+
+        .result h3 {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .course-list {
+            margin-top: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .course-item {
+            background: #f8f9fa;
+            padding: 14px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .course-item:hover {
+            background: #e8f0fe;
+            border-color: #667eea;
+        }
+
+        .course-item.selected {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border-color: #667eea;
+        }
+
+        .course-checkbox {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            border: 2px solid #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.2s;
+        }
+
+        .course-item.selected .course-checkbox {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+
+        .course-checkbox::after {
+            content: "";
+            width: 8px;
+            height: 5px;
+            border-left: 2px solid white;
+            border-bottom: 2px solid white;
+            transform: rotate(-45deg);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .course-item.selected .course-checkbox::after {
+            opacity: 1;
+        }
+
+        .course-info {
+            flex: 1;
+        }
+
+        .course-item h4 {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .course-item .detail {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .course-item .detail span {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .course-item .detail span b {
+            color: #555;
+        }
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .checkout-summary {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .checkout-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+
+        .checkout-item:last-child {
+            border-bottom: none;
+        }
+
+        .checkout-total {
+            display: flex;
+            justify-content: space-between;
+            padding: 16px 0 0;
+            margin-top: 8px;
+            border-top: 2px solid #667eea;
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .price-per-course {
+            color: #888;
+            font-size: 13px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 16px;
+            color: #888;
+            font-size: 14px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+            background: white;
+        }
+
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+
+        .success-icon {
+            text-align: center;
+            font-size: 60px;
+            margin-bottom: 16px;
+        }
+
+        .success-text {
+            text-align: center;
+            font-size: 18px;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .success-detail {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .selected-count {
+            text-align: center;
+            color: #888;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        .recharge-section {
+            text-align: center;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            margin-top: 16px;
+        }
+
+        .recharge-section p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .recharge-section .wechat-id {
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>平台管理面板</h1>
+
+        <div class="balance-card">
+            <span class="balance-label">账户余额</span>
+            <div>
+                <span class="balance-value" id="balanceValue">--</span>
+                <span class="balance-unit">元</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="page-query" class="page active">
+                <h2>🔍 课程查询</h2>
+                <div class="form-group">
+                    <label>平台选择</label>
+                    <select id="platform" class="form-control">
+                        <option value="4076">学习通</option>
+                        <option value="14779">U校园</option>
+                        <option value="12899">welearn</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>用户账号</label>
+                    <input type="text" id="user" placeholder="输入下单账号">
+                </div>
+                <div class="form-group">
+                    <label>用户密码</label>
+                    <input type="text" id="pass" placeholder="输入下单密码">
+                </div>
+                <button class="btn" id="btnGet" onclick="getCourse()">查询课程</button>
+                <div class="loading" id="getLoading">查询中</div>
+                <div class="result" id="getResult"></div>
+                <div class="recharge-section">
+                    <p>余额充值联系：</p>
+                    <div class="wechat-id">zxc10000</div>
+                </div>
+            </div>
+
+            <div id="page-select" class="page">
+                <h2> 选择课程</h2>
+                <p class="price-per-course">每个课程 ¥3.50</p>
+                <div class="course-list" id="courseList"></div>
+                <div class="selected-count" id="selectedCount">已选 0 个课程</div>
+                <button class="btn btn-orange" id="btnGoCheckout" onclick="goToCheckout()" disabled>我选好了</button>
+            </div>
+
+            <div id="page-checkout" class="page">
+                <h2>💰 订单结算</h2>
+                <div class="checkout-summary" id="checkoutSummary"></div>
+                <button class="btn btn-green" id="btnPlaceOrder" onclick="placeOrder()">确认下单</button>
+                <button class="btn" style="background:#999;margin-top:8px;" onclick="backToSelect()">返回修改</button>
+                <div class="loading" id="orderLoading">下单中</div>
+                <div class="result" id="orderResult"></div>
+            </div>
+
+            <div id="page-success" class="page">
+                <div class="success-icon">🎉</div>
+                <div class="success-text">下单成功！</div>
+                <div class="success-detail" id="successDetail"></div>
+                <button class="btn" onclick="resetAll()">继续下单</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const TOKEN = '99u88E668mUe9660oCc6cOrU86EcEFOEa7tcR8u87e8u88Ug6mRtGwZ8mRA8M';
+        const PLATFORM = '4076';
+        const PRICE_PER_COURSE = 3.5;
+        let coursesData = [];
+        let selectedCourses = [];
+
+        async function loadBalance() {
+            try {
+                const res = await fetch('/api/getinfo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: TOKEN })
+                });
+                const data = await res.json();
+                if (data.code === 1 && data.data) {
+                    document.getElementById('balanceValue').textContent = data.data.money || '0';
+                }
+            } catch (e) {}
+        }
+
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+        }
+
+        function getSelectedPlatform() {
+            return document.getElementById('platform').value;
+        }
+
+        async function getCourse() {
+            const user = document.getElementById('user').value.trim();
+            const pass = document.getElementById('pass').value.trim();
+            const platform = getSelectedPlatform();
+
+            if (!user || !pass) {
+                showResult('getResult', 'error', '请填写账号和密码');
+                return;
+            }
+
+            const btn = document.getElementById('btnGet');
+            const loading = document.getElementById('getLoading');
+            const result = document.getElementById('getResult');
+
+            btn.disabled = true;
+            loading.classList.add('show');
+            result.classList.remove('show');
+
+            try {
+                const res = await fetch('/api/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: TOKEN, platform: platform, user, pass })
+                });
+                const data = await res.json();
+
+                if (data.code === 1 && data.data) {
+                    coursesData = Array.isArray(data.data) ? data.data : [data.data];
+                    selectedCourses = [];
+                    renderCourseList();
+                    showPage('page-select');
+                } else {
+                    showResult('getResult', 'error', data.msg || '请求失败');
+                }
+            } catch (error) {
+                showResult('getResult', 'error', `请求失败: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                loading.classList.remove('show');
+            }
+        }
+
+        function renderCourseList() {
+            const container = document.getElementById('courseList');
+            let html = '';
+
+            coursesData.forEach((course, index) => {
+                const name = course.name || course.course_name || course.title || '未知课程';
+                const teacher = course.teacher || course.instructor || course.tname || '未知教师';
+                const classname = course.class || course.classname || course.class_name || '未知班级';
+                const isSelected = selectedCourses.includes(index);
+
+                html += `
+                    <div class="course-item ${isSelected ? 'selected' : ''}" onclick="toggleCourse(${index})" id="course-${index}">
+                        <div class="course-checkbox"></div>
+                        <div class="course-info">
+                            <h4>${name}</h4>
+                            <div class="detail">
+                                <span>教师: <b>${teacher}</b></span>
+                                <span>班级: <b>${classname}</b></span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+            updateSelectedCount();
+        }
+
+        function toggleCourse(index) {
+            const pos = selectedCourses.indexOf(index);
+            if (pos === -1) {
+                selectedCourses.push(index);
+            } else {
+                selectedCourses.splice(pos, 1);
+            }
+
+            const el = document.getElementById(`course-${index}`);
+            el.classList.toggle('selected');
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const count = selectedCourses.length;
+            document.getElementById('selectedCount').textContent = `已选 ${count} 个课程`;
+            document.getElementById('btnGoCheckout').disabled = count === 0;
+        }
+
+        function goToCheckout() {
+            if (selectedCourses.length === 0) return;
+
+            const total = (selectedCourses.length * PRICE_PER_COURSE).toFixed(2);
+            let html = '';
+
+            selectedCourses.forEach(index => {
+                const course = coursesData[index];
+                const name = course.name || course.course_name || course.title || '未知课程';
+                html += `<div class="checkout-item"><span>${name}</span><span>¥3.50</span></div>`;
+            });
+
+            html += `
+                <div class="checkout-total">
+                    <span>合计 (${selectedCourses.length}个课程)</span>
+                    <span>¥${total}</span>
+                </div>
+            `;
+
+            document.getElementById('checkoutSummary').innerHTML = html;
+            showPage('page-checkout');
+        }
+
+        function backToSelect() {
+            showPage('page-select');
+        }
+
+        async function placeOrder() {
+            const btn = document.getElementById('btnPlaceOrder');
+            const loading = document.getElementById('orderLoading');
+            const result = document.getElementById('orderResult');
+            const platform = getSelectedPlatform();
+
+            btn.disabled = true;
+            loading.classList.add('show');
+            result.classList.remove('show');
+
+            const user = document.getElementById('user').value.trim();
+            const pass = document.getElementById('pass').value.trim();
+            let successCount = 0;
+            let failMsg = '';
+
+            try {
+                for (const index of selectedCourses) {
+                    const course = coursesData[index];
+                    const kcname = course.name || course.course_name || course.title || '';
+                    const kcid = course.id || course.kcid || '';
+
+                    const orderData = { token: TOKEN, platform: platform, user, pass, kcname };
+                    if (kcid) orderData.kcid = kcid;
+
+                    const res = await fetch('/api/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(orderData)
+                    });
+                    const data = await res.json();
+
+                    if (data.code === 1) {
+                        successCount++;
+                    } else {
+                        failMsg = data.msg || '未知错误';
+                    }
+                }
+
+                if (successCount > 0) {
+                    const total = (successCount * PRICE_PER_COURSE).toFixed(2);
+                    document.getElementById('successDetail').innerHTML = `
+                        成功下单 ${successCount} 个课程<br>
+                        共计 ¥${total}
+                    `;
+                    showPage('page-success');
+                    loadBalance();
+                } else {
+                    showResult('orderResult', 'error', `下单失败: ${failMsg}`);
+                }
+            } catch (error) {
+                showResult('orderResult', 'error', `下单失败: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                loading.classList.remove('show');
+            }
+        }
+
+        function resetAll() {
+            selectedCourses = [];
+            showPage('page-query');
+        }
+
+        function showResult(elementId, type, message) {
+            const el = document.getElementById(elementId);
+            el.className = `result show ${type}`;
+            el.innerHTML = `<h3>${message}</h3>`;
+        }
+
+        loadBalance();
+    </script>
+</body>
+</html>
