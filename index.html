@@ -519,7 +519,7 @@
 
         async function loadBalance() {
             try {
-                const res = await fetch('/api/getinfo', {
+                const res = await fetch('/api/getInfo', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token: TOKEN })
@@ -559,10 +559,10 @@
             result.classList.remove('show');
 
             try {
-                const res = await fetch('/api/get', {
+                const res = await fetch('/api/queryCourse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: TOKEN, platform: platform, user, pass })
+                    body: JSON.stringify({ account: user, password: pass, platform: platform })
                 });
                 const data = await res.json();
 
@@ -677,10 +677,10 @@
                     const kcname = course.name || course.course_name || course.title || '';
                     const kcid = course.id || course.kcid || '';
 
-                    const orderData = { token: TOKEN, platform: platform, user, pass, kcname };
+                    const orderData = { account: user, password: pass, platform: platform, kcname };
                     if (kcid) orderData.kcid = kcid;
 
-                    const res = await fetch('/api/add', {
+                    const res = await fetch('/api/addCourse', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(orderData)
