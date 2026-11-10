@@ -54,3 +54,5 @@ await fetch('https://YOUR_SITE/api/ai/decisions', {
 DEMO_TRADING_ENABLED=true 才可下单。仅支持SWAP、cross/isolated、净持仓/双向持仓，以及欧意账户等级2/3。其他账户模式安全拒绝。所有请求强制x-simulated-trading:1。净持仓必须reduceOnly；双向持仓平多sell+long、平空buy+short。
 
 新增错误：INVALID_CLOSE_REQUEST、DEMO_TRADING_DISABLED、POSITION_CHANGED、QUANTITY_CHANGED、BELOW_MINIMUM_SIZE、INSUFFICIENT_CLOSEABLE_SIZE、UNSUPPORTED_ACCOUNT_MODE、UNSUPPORTED_POSITION_MODE、MARKET_SIZE_EXCEEDED、CLOSE_IN_PROGRESS、IDEMPOTENCY_CONFLICT。错误/待确认操作必须先查看记录，不得以新requestId盲目重试。
+
+2026-11-10 修复：SWAP 不依赖 availPos；从实际持仓绝对值扣除同方向未成交平仓委托，返回 closeableSize、reservedCloseSize、closeableSource。默认市价平仓（ordType=market，不传限价），默认选择100%，仍可滑动调整。下单前重新计算并核对。
