@@ -20,10 +20,10 @@ Node 22 或以上。`npm ci`，`npm run build`，`npm test`。
 - 登录保护全部账户、持仓与平台管理接口；随机会话8小时，HttpOnly/Secure/SameSite cookie。
 - 交易所 Secret 仅在 Cloudflare Secrets；平台 API Key 使用256位随机数、SHA-256哈希入库，只在生成时显示全文。遗失请轮换。
 - **部分平仓支持欧意模拟盘市价减仓。** 滑动条选择1–100%比例，服务端以最新仓位与交易所步长重新计算张数；净持仓使用reduceOnly，双向持仓使用平多/平空组合。DEMO_TRADING_ENABLED=true 独立启用；所有请求强制模拟盘头，不支持实盘下单。
-- 止盈止损保护订单尚未接入；收益账本已接入真实成交与账单，按已同步范围展示累计净收益。
+- 已接入模拟盘下单、平仓、止盈止损与撤单；收益账本接入真实成交与账单，按已同步范围展示累计净收益。
 - 钱包与保证金数据基于 OKX 的 USDT 明细；总权益为 OKX totalEq 的 USD 估值，两者币种不同。
 - 停止按钮只记录 QuantOS 未来交易禁用状态，不停止其他程序。
-- 普通 ChatGPT 聊天不会因为网站有 API 就自动调用。未来需要受支持连接器/MCP；当前已提供标准 Bearer API。
+- 手机 ChatGPT 可使用已安装的 QuantOS 私有连接器；模拟交易需要专用 demo_trade 权限。
 - 图片使用生图模型生成；同步脉冲与加载动画为网页动画，当前没有可用 GIF 生成模型。
 
 详见 [API 文档](docs/API.md) 与 [设计留存](docs/设计说明.md)。
@@ -32,6 +32,6 @@ V1.2：新增收益账本与历史记录，四张独立像素雪景分别用于�
 
 ## ChatGPT / MCP 连接
 
-新增独立 Cloudflare MCP 服务，地址为 `https://marya-4j3.pages.dev/mcp`。只提供账户、持仓、收益、状态读取以及交易计划保存和查询，不提供交易所下单工具。计划可在网站 AI手记 查看。
+独立 Cloudflare MCP 服务地址为 `https://marya-4j3.pages.dev/mcp`。基础密钥提供6个账户读取与计划工具；获授权的 demo_trade 密钥可用15个工具，增加模拟盘市价/限价下单、市价平仓、设置/修改/取消止盈止损、撤单和操作查询。计划可在网站 AI手记 查看。详见 [模拟交易授权](docs/MCP模拟交易授权.md)。
 
 ChatGPT 使用 Sites 私有连接器承接账户登录，服务器专用平台密钥以 Secret 保管。完整操作和手机实际验收步骤见 [MCP接入与手机验收](docs/MCP接入与手机验收.md)。
