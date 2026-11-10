@@ -19,7 +19,7 @@
 | /api/keys | GET | 登录会话 | 只返回掩码、元数据 |
 | /api/keys | POST | 登录会话 | `{"name":"GPT","scopes":["read","write"]}`，返回一次性完整 key |
 | /api/keys/:id/revoke | POST | 登录会话 | 撤销密钥；轮换为先创建后撤销 |
-| /api/trades/:id/close | POST | 登录会话 | `{"confirm":true,"requestId":"UUID"}`，重新同步真实持仓后生成模拟审计 |
+| /api/trades/:id/close | POST | 登录会话 | `{"confirm":true,"requestId":"UUID","percent":25,"expectedPos":"10","expectedQuantity":"2.5","expectedInstId":"BTC-USDT-SWAP","expectedPosSide":"net"}`，欧意模拟盘市价减仓，详见下方 V1.1 接口 |
 | /api/system/halt | POST | 登录会话 | `{}`，记录停止未来指令 |
 
 写入示例：
@@ -38,4 +38,19 @@ await fetch('https://YOUR_SITE/api/ai/decisions', {
 
 错误：400 INVALID_JSON / INVALID_KEY_INPUT / INVALID_RECORD / CONFIRMATION_REQUIRED；401 UNAUTHORIZED / INVALID_LOGIN；403 ORIGIN_DENIED；404 NOT_FOUND / POSITION_NOT_FOUND；409 SYNC_IN_PROGRESS / DUPLICATE_REQUEST；413 REQUEST_TOO_LARGE；429 RATE_LIMITED；503 ADMIN_NOT_CONFIGURED / OKX_CREDENTIALS_INCOMPLETE / SYNC_NETWORK_FAILURE；交易所失败只返回脱敏 OKX_ERROR_数字 或 OKX_HTTP_状态码。
 
-模拟平仓状态 SIMULATED 不代表交易所实际成交。没有实盘订单接口。仅会话用户可操作模拟平仓和停止状态，read/write无法调用。
+仅会话用户可操作模拟盘平仓和停止状态，read/write无法调用。旧版SIMULATED记录只代表旧模拟审计，新版返回交易所订单状态。没有实盘交易接口。
+
+## V1.1 部分平仓
+
+- GET /api/trades/:positionId/close-quote：登录会话；返回交易所新鲜持仓、lotSz、minSz、maxMktSz、合约面值、模式及enabled。不下单。
+- POST /api/trades/:positionId/close：登录会话；使用表中的确认请求。比例为1–100整数。数量单位是合约张数，并按lotSz向下取整。服务端核对expectedPos、expectedQuantity、expectedInstId、expectedPosSide；不信任前端数量。
+- GET /api/trades/actions：登录会话；最近30次操作，状态及实际成交量。
+- POST /api/trades/actions/:requestId/reconcile：登录会话；查询原clOrdId订单并重新同步持仓，绝不重新下单。
+
+状态：SUBMITTING/PENDING/LIVE/PARTIALLY_FILLED/UNKNOWN 尚未终结；FILLED/CANCELED/MMP_CANCELED/REJECTED 为终态。filledQuantity为交易所累计成交张数，remainingPosition为随后账户查询结果；syncError非空时剩余仓位可能尚未更新。
+
+同一requestId只能提交一次，重复请求查询原订单；同一持仓最多一个待确认操作。订单超时后先查订单，查不到仍保持UNKNOWN，不自动重发。已有其他委托占用仓位时不擅自撤单。
+
+DEMO_TRADING_ENABLED=true 才可下单。仅支持SWAP、cross/isolated、净持仓/双向持仓，以及欧意账户等级2/3。其他账户模式安全拒绝。所有请求强制x-simulated-trading:1。净持仓必须reduceOnly；双向持仓平多sell+long、平空buy+short。
+
+新增错误：INVALID_CLOSE_REQUEST、DEMO_TRADING_DISABLED、POSITION_CHANGED、QUANTITY_CHANGED、BELOW_MINIMUM_SIZE、INSUFFICIENT_CLOSEABLE_SIZE、UNSUPPORTED_ACCOUNT_MODE、UNSUPPORTED_POSITION_MODE、MARKET_SIZE_EXCEEDED、CLOSE_IN_PROGRESS、IDEMPOTENCY_CONFLICT。错误/待确认操作必须先查看记录，不得以新requestId盲目重试。

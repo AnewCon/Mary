@@ -1,4 +1,4 @@
-# QuantOS V1.0
+# QuantOS V1.1
 
 私人交易监控终端。React + TypeScript + Vite；Cloudflare Pages 前端、Workers API、D1 存储、每分钟 Cron。当前交易所为 **OKX 模拟账户**，以用户最新要求为准。
 
@@ -19,7 +19,7 @@ Node 22 或以上。`npm ci`，`npm run build`，`npm test`。
 
 - 登录保护全部账户、持仓与平台管理接口；随机会话8小时，HttpOnly/Secure/SameSite cookie。
 - 交易所 Secret 仅在 Cloudflare Secrets；平台 API Key 使用256位随机数、SHA-256哈希入库，只在生成时显示全文。遗失请轮换。
-- **终止交易仅模拟审计，不发送任何交易所订单，不改变持仓。** 实盘平仓、自动交易引擎均未实现，不可通过配置绕过。
+- **部分平仓支持欧意模拟盘市价减仓。** 滑动条选择1–100%比例，服务端以最新仓位与交易所步长重新计算张数；净持仓使用reduceOnly，双向持仓使用平多/平空组合。DEMO_TRADING_ENABLED=true 独立启用；所有请求强制模拟盘头，不支持实盘下单。
 - 止盈止损订单、历史成交已实现盈亏尚未接入，显示缺失状态，不推算虚构数据。
 - 钱包与保证金数据基于 OKX 的 USDT 明细；总权益为 OKX totalEq 的 USD 估值，两者币种不同。
 - 停止按钮只记录 QuantOS 未来交易禁用状态，不停止其他程序。

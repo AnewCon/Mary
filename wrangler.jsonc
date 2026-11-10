@@ -24,6 +24,7 @@
   ],
   "vars": {
     "EXCHANGE": "OKX",
-    "TRADING_MODE": "simulation"
+    "TRADING_MODE": "simulation",
+    "DEMO_TRADING_ENABLED": "true"
   }
 }
