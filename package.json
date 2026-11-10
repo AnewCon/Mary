@@ -1,18 +1,2 @@
-{
-  "name": "shua",
-  "version": "1.0.0",
-  "description": "",
-  "main": "get_info.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "build": "mkdir -p dist && cp index.html dist/"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "express": "^5.2.1"
-  }
-}
+{"name":"quantos","private":true,"type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"tsc --noEmit && vite build","test":"node --test tests/*.test.mjs","deploy":"npm run build && wrangler deploy","dev:api":"wrangler dev"},"dependencies":{"react":"^19.0.0","react-dom":"^19.0.0","lucide-react":"^0.468.0"},"devDependencies":{"vite":"^6.0.0","typescript":"^5.7.0","@types/react":"^19.0.0","@types/react-dom":"^19.0.0","wrangler":"^4.0.0","@cloudflare/workers-types":"^5.20261109.1"}}
+

@@ -1,0 +1,29 @@
+{
+  "name": "quantos",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "quantos-db",
+      "database_id": "b1a48e69-f422-49b2-a95b-0c21c9ce897a"
+    }
+  ],
+  "vars": {
+    "EXCHANGE": "OKX",
+    "TRADING_MODE": "simulation"
+  }
+}

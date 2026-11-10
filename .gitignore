@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.dev.vars
+.env*
+!.env.example
+.wrangler/
+cf-check.mjs
+scripts/cloud.mjs
