@@ -1,6 +1,7 @@
 const read={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
 const empty={type:'object',properties:{},additionalProperties:false};
 export const tools=[
+ {name:'quantos_get_history',title:'读取历史成交与收益账单',description:'读取欧意模拟账户已同步的永续历史记录。kind=fills为成交明细（价格、数量、方向、手续费、已实现盈亏），bills为收益账单（已实现盈亏、手续费、资金费等）。每页最多50条，nextCursor非空时沿用kind与游标继续读取，不能把一页视为全部历史。返回历史同步时间、回溯范围、完整性和收益口径；不触发同步、不下单。累计净收益以quantos_get_performance为准，避免成交与账单重复计收益。',inputSchema:{type:'object',properties:{kind:{type:'string',enum:['fills','bills'],description:'必填：成交明细或收益账单'},cursor:{type:'string',maxLength:1000,description:'上一页nextCursor原样传回；第一页省略'}},required:['kind'],additionalProperties:false},annotations:read},
  {name:'quantos_get_account',title:'读取 QuantOS 账户',description:'读取欧意模拟账户权益、余额、快照与实际同步时间，不执行交易。',inputSchema:empty,annotations:read},
  {name:'quantos_get_positions',title:'读取当前仓位',description:'读取当前欧意模拟盘永续持仓。返回真实同步时间和过期标志；不是实盘账户。',inputSchema:empty,annotations:read},
  {name:'quantos_get_status',title:'检查同步状态',description:'读取账户连接、同步时间、错误及模拟盘状态。',inputSchema:empty,annotations:read},
