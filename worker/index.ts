@@ -1,4 +1,4 @@
-import {tradeContext,orders as demoOrders,execute as demoExecute,actionStatus as demoActionStatus,mcpClose} from './demo-broker';
+import {leverageInfo,tradeContext,orders as demoOrders,execute as demoExecute,actionStatus as demoActionStatus,mcpClose} from './demo-broker';
 import {createPlan,listPlans} from './plans';
 import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
@@ -21,12 +21,13 @@ if(p==='/api/sync'&&m==='POST'){await limit(e,'sync',4);return json(await sync(e
 if(p==='/api/performance'&&m==='GET')return json(await performance(e));
 if(p==='/api/history'&&m==='GET')return json(await history(e,u));
 if(p==='/api/performance/sync'&&m==='POST'){await limit(e,'history-sync',6);return json(await syncPerformance(e))}
-if(p==='/api/demo/capabilities'&&m==='GET')return json({enabled:e.DEMO_TRADING_ENABLED==='true'&&e.MCP_DEMO_TRADING_ENABLED==='true',mode:'demo',scope:'demo_trade',operations:['place','close','protect','amend_protection','cancel_protection','cancel_order']});
+if(p==='/api/demo/capabilities'&&m==='GET')return json({enabled:e.DEMO_TRADING_ENABLED==='true'&&e.MCP_DEMO_TRADING_ENABLED==='true',mode:'demo',scope:'demo_trade',operations:['leverage','place','close','protect','amend_protection','cancel_protection','cancel_order']});
+if(p==='/api/demo/leverage'&&m==='GET')return json(await leverageInfo(e,u.searchParams.get('instId')||'',u.searchParams.get('marginMode')||''));
 if(p==='/api/demo/context'&&m==='GET')return json(await tradeContext(e,u.searchParams.get('instId')||''));
 if(p==='/api/demo/orders'&&m==='GET')return json(await demoOrders(e,u.searchParams.get('instId')||undefined));
 if(/^\/api\/demo\/actions\/[a-f0-9-]+$/i.test(p)&&m==='GET')return json(await demoActionStatus(e,p.split('/')[4],sync));
 if(p==='/api/demo/close'&&m==='POST'){await limit(e,'demo:'+principal,20);return json(await mcpClose(e,await body(r),sync))}
-if(/^\/api\/demo\/(place|protect|amend_protection|cancel_protection|cancel_order)$/.test(p)&&m==='POST'){await limit(e,'demo:'+principal,20);return json(await demoExecute(e,p.split('/')[3],await body(r),principal,sync))}
+if(/^\/api\/demo\/(leverage|place|protect|amend_protection|cancel_protection|cancel_order)$/.test(p)&&m==='POST'){await limit(e,'demo:'+principal,20);return json(await demoExecute(e,p.split('/')[3],await body(r),principal,sync))}
 if(p==='/api/keys'&&m==='GET')return json((await e.DB.prepare('SELECT id,name,mask,scopes,created_at,last_used_at,revoked FROM api_keys ORDER BY created_at DESC').all()).results);
 if(p==='/api/keys'&&m==='POST'){const b=await body(r);if(typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.some((s:string)=>!['read','write','demo_trade'].includes(s)))throw new Failure('INVALID_KEY_INPUT');const key=randomKey(),id=crypto.randomUUID();await e.DB.prepare('INSERT INTO api_keys(id,name,hash,mask,scopes,created_at) VALUES(?,?,?,?,?,?)').bind(id,b.name,await hash(key),key.slice(0,8)+'…'+key.slice(-4),JSON.stringify(b.scopes),now()).run();return json({id,key})}
 if(/^\/api\/keys\/[^/]+\/scopes$/.test(p)&&m==='POST'){const b=await body(r);if(!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>3||b.scopes.some((s:string)=>!['read','write','demo_trade'].includes(s)))throw new Failure('INVALID_SCOPES');await e.DB.prepare('UPDATE api_keys SET scopes=? WHERE id=? AND revoked=0').bind(JSON.stringify([...new Set(b.scopes)]),p.split('/')[3]).run();return json({updated:true})}
