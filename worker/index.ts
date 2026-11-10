@@ -1,6 +1,7 @@
 import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
+import {performance,history,syncPerformance} from './performance';
 interface Env{DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
@@ -15,6 +16,9 @@ if(p==='/api/logout'&&m==='POST'){const token=r.headers.get('Cookie')?.match(/qu
 if(p==='/api/status'&&m==='GET'){const a=await e.DB.prepare('SELECT updated_at FROM account_snapshots WHERE id=1').first<any>();const last=await e.DB.prepare('SELECT * FROM sync_logs ORDER BY id DESC LIMIT 1').first<any>();const halt=await e.DB.prepare("SELECT value FROM system_settings WHERE key='halt'").first<any>();return json({exchange:'OKX',mode:'demo',demoTradingEnabled:e.DEMO_TRADING_ENABLED==='true',interval:60,configured:!!(e.OKX_API_KEY&&e.OKX_SECRET_KEY&&e.OKX_PASSPHRASE),updatedAt:a?.updated_at||null,stale:!a||Date.now()-Date.parse(a.updated_at)>120000,error:last?.error||null,halt:halt?.value==='true'})}
 if(['/api/account','/api/positions'].includes(p)&&m==='GET'){const row=await e.DB.prepare('SELECT data FROM account_snapshots WHERE id=1').first<{data:string}>();const data=row?JSON.parse(row.data):null;return json(p.endsWith('positions')?data?.positions||[]:data)}
 if(p==='/api/sync'&&m==='POST'){await limit(e,'sync',4);return json(await sync(e))}
+if(p==='/api/performance'&&m==='GET')return json(await performance(e));
+if(p==='/api/history'&&m==='GET')return json(await history(e,u));
+if(p==='/api/performance/sync'&&m==='POST'){await limit(e,'history-sync',6);return json(await syncPerformance(e))}
 if(p==='/api/keys'&&m==='GET')return json((await e.DB.prepare('SELECT id,name,mask,scopes,created_at,last_used_at,revoked FROM api_keys ORDER BY created_at DESC').all()).results);
 if(p==='/api/keys'&&m==='POST'){const b=await body(r);if(typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.some((s:string)=>!['read','write'].includes(s)))throw new Failure('INVALID_KEY_INPUT');const key=randomKey(),id=crypto.randomUUID();await e.DB.prepare('INSERT INTO api_keys(id,name,hash,mask,scopes,created_at) VALUES(?,?,?,?,?,?)').bind(id,b.name,await hash(key),key.slice(0,8)+'…'+key.slice(-4),JSON.stringify(b.scopes),now()).run();return json({id,key})}
 if(/^\/api\/keys\/[^/]+\/revoke$/.test(p)&&m==='POST'){await e.DB.prepare('UPDATE api_keys SET revoked=1 WHERE id=?').bind(p.split('/')[3]).run();return json({revoked:true})}
@@ -25,4 +29,4 @@ if(p==='/api/trades/actions'&&m==='GET')return json((await e.DB.prepare('SELECT 
 if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(await reconcile(e,p.split('/')[4],sync));
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
-export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){ctx.waitUntil((async()=>{try{await sync(e)}catch{}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
+export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
