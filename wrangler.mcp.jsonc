@@ -1,0 +1,1 @@
+{"name":"quantos-mcp","main":"mcp/index.ts","compatibility_date":"2026-11-01","services":[{"binding":"API","service":"quantos"}]}
