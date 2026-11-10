@@ -29,3 +29,9 @@ Node 22 或以上。`npm ci`，`npm run build`，`npm test`。
 详见 [API 文档](docs/API.md) 与 [设计留存](docs/设计说明.md)。
 
 V1.2：新增收益账本与历史记录，四张独立像素雪景分别用于不同页面。设计与统计口径详见 docs/雪间设计与收益口径.md。
+
+## ChatGPT / MCP 连接
+
+新增独立 Cloudflare MCP 服务，地址为 `https://marya-4j3.pages.dev/mcp`。只提供账户、持仓、收益、状态读取以及交易计划保存和查询，不提供交易所下单工具。计划可在网站 AI手记 查看。
+
+ChatGPT 使用 Sites 私有连接器承接账户登录，服务器专用平台密钥以 Secret 保管。完整操作和手机实际验收步骤见 [MCP接入与手机验收](docs/MCP接入与手机验收.md)。

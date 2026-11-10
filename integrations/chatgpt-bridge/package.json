@@ -1,0 +1,1 @@
+{"name":"quantos-chatgpt-bridge","private":true,"type":"module","scripts":{"build":"node scripts/build.mjs"}}
