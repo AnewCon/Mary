@@ -11,25 +11,20 @@
 }
 .equity-animation {
   width: 100%;
-  overflow: hidden;
-  border: 1px solid #b6d2d276;
-  border-radius: 10px;
-  background: #183746e8;
   color: #f3faf5;
-  box-shadow: 2px 3px 0 #17384940;
 }
-.equity-art { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #173647; }
+.equity-art { position: relative; aspect-ratio: 16 / 9; }
 .equity-frame { position: absolute; inset: 0; opacity: 0; transition: opacity .75s ease; }
 .equity-frame.visible { opacity: 1; }
-.equity-frame img { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
-.equity-caption { padding: 8px 10px 10px; }
+.equity-frame img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 2px 2px #182f3980); }
+.equity-caption { padding: 0 10px 6px; text-shadow: 0 1px 2px #122933, 0 0 5px #122933; }
 .equity-label, .equity-reading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.equity-label { font-size: 11px; color: #d8e9e6; }
-.equity-label button { padding: 2px; color: inherit; border: 0; background: transparent; box-shadow: none; }
+.equity-label { font-size: 11px; font-weight: 650; color: #f6fffb; }
+.equity-label button { padding: 2px; color: inherit; border: 0; background: transparent; box-shadow: none; filter: drop-shadow(0 1px 2px #122933); }
 .equity-label button:hover { color: #fff; background: #ffffff15; }
 .equity-reading { margin-top: 5px; flex-wrap: wrap; }
 .equity-reading strong { font: 650 18px 'Courier New', monospace; overflow-wrap: anywhere; }
-.equity-reading span, .equity-caption p { color: #d5e9e6; font-size: 10px; margin: 3px 0 0; }
+.equity-reading span, .equity-caption p { color: #f6fffb; font-size: 10px; margin: 3px 0 0; }
 .capital-settings label { display: block; margin-bottom: 6px; font-size: 12px; }
 .capital-input { display: flex; gap: 8px; flex-wrap: wrap; }
 .capital-input input { width: 190px; }

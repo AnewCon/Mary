@@ -40,8 +40,8 @@ export default function EquityAnimation({ equity, capital, stale, onConfigure }:
       <div className="equity-art" aria-hidden="true">
         {scenes.map(item => (
           <picture key={item.id} className={item.id === scene.id ? 'equity-frame visible' : 'equity-frame'}>
-            <source media="(prefers-reduced-motion: reduce)" srcSet={'/assets/equity-animation/' + item.id + '.webp'} />
-            <img src={'/assets/equity-animation/' + item.id + '.gif'} alt="" width="256" height="144" />
+            <source media="(prefers-reduced-motion: reduce)" srcSet={'/assets/equity-animation/' + item.id + '.webp?v=2'} />
+            <img src={'/assets/equity-animation/' + item.id + '.gif?v=2'} alt="" width="256" height="144" />
           </picture>
         ))}
       </div>
