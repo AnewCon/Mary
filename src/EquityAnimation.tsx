@@ -36,7 +36,7 @@ export default function EquityAnimation({ equity, capital, stale, onConfigure }:
   const scene = state?.scene ?? scenes[2];
 
   return (
-    <section className="equity-animation" aria-label="账户权益相对本金">
+    <section className="panel equity-animation" aria-labelledby="equity-animation-title">
       <div className="equity-art" aria-hidden="true">
         {scenes.map(item => (
           <picture key={item.id} className={item.id === scene.id ? 'equity-frame visible' : 'equity-frame'}>
@@ -46,16 +46,19 @@ export default function EquityAnimation({ equity, capital, stale, onConfigure }:
         ))}
       </div>
       <div className="equity-caption">
-        <div className="equity-label">
-          <span>权益较本金</span>
-          <button type="button" onClick={onConfigure} aria-label="设置本金基准" title="设置本金基准"><ArrowUpRight size={14}/></button>
-        </div>
+        <h2 id="equity-animation-title">盈收状态</h2>
         {state ? (
-          <div className="equity-reading">
-            <strong className={state.change < 0 ? 'today-loss' : state.change > 0 ? 'today-gain' : ''}>{percent.format(state.change)}</strong>
-            <span>{scene.name}{stale ? ' · 最近快照' : ''}</span>
-          </div>
-        ) : <p>{capital ? '等待账户权益同步' : '设置本金后显示涨跌'}</p>}
+          <>
+            <div className="equity-label">权益较本金</div>
+            <div className="equity-reading">
+              <strong className={state.change < 0 ? 'red' : state.change > 0 ? 'green' : ''}>{percent.format(state.change)}</strong>
+              <span>{scene.name}{stale ? ' · 最近快照' : ''}</span>
+            </div>
+          </>
+        ) : <p>{capital ? '等待账户权益同步' : '设置本金后显示权益涨跌'}</p>}
+        <button type="button" className="equity-configure" onClick={onConfigure}>
+          {capital ? '调整本金' : '设置本金'} <ArrowUpRight size={14} aria-hidden="true" />
+        </button>
       </div>
     </section>
   );
