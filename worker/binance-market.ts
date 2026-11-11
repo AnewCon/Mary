@@ -9,15 +9,27 @@ const cache = new Map<string, { until: number; value: Promise<any> }>();
 let backoffUntil = 0;
 type Endpoint = 'exchangeInfo' | 'ticker/price' | 'klines' | 'aggTrades' | 'premiumIndex' | 'openInterest';
 export interface MarketBudget { remaining:number; deadline:number }
+export interface MarketEnv { BINANCE_RELAY_ORIGIN?:string; BINANCE_RELAY_TOKEN?:string }
+
+function marketOrigin(env:MarketEnv) {
+  if(!env.BINANCE_RELAY_ORIGIN&&!env.BINANCE_RELAY_TOKEN)return host;
+  try {
+    const url=new URL(env.BINANCE_RELAY_ORIGIN??'');
+    if(url.protocol==='https:'&&url.pathname==='/'&&!url.username&&!url.password&&!url.search&&!url.hash&&
+       url.hostname!==new URL(host).hostname&&/^[A-Za-z0-9_-]{32,128}$/.test(env.BINANCE_RELAY_TOKEN??''))return url.origin;
+  }catch{}
+  throw new Failure('BINANCE_RELAY_CONFIGURATION',503);
+}
 
 function marketPath(endpoint:Endpoint,params:Record<string,string|number>) {
   const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
   return `/fapi/${endpoint === 'ticker/price' ? 'v2' : 'v1'}/${endpoint}?${query}`;
 }
 
-async function market(endpoint: Endpoint, params: Record<string, string | number> = {}, ttl = 0, budget?:MarketBudget) {
+async function market(env:MarketEnv,endpoint: Endpoint, params: Record<string, string | number> = {}, ttl = 0, budget?:MarketBudget) {
   const path=marketPath(endpoint,params);
-  const hit = cache.get(path);
+  const origin=marketOrigin(env),url=origin+path;
+  const hit = cache.get(url);
   if (hit && hit.until > Date.now()) return hit.value;
   if (Date.now() < backoffUntil) throw new Failure('BINANCE_RATE_BACKOFF', 503);
   if(budget){
@@ -26,22 +38,24 @@ async function market(endpoint: Endpoint, params: Record<string, string | number
   }
   const value = (async () => {
     let response: Response;
-    try { response = await fetch(host + path, { method: 'GET', signal: AbortSignal.timeout(4500), redirect: 'manual' }); }
+    try { response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(4500), redirect: 'manual',
+      ...(origin!==host?{headers:{Authorization:'Bearer '+env.BINANCE_RELAY_TOKEN}}:{}) }); }
     catch { throw new Failure('BINANCE_NETWORK', 503); }
     if ([429, 418].includes(response.status)) {
       const seconds = Number(response.headers.get('Retry-After'));
       backoffUntil = Date.now() + Math.max(60, Number.isFinite(seconds) ? seconds : 0) * 1000;
     }
     if (!response.ok) throw new Failure(`BINANCE_HTTP_${response.status}`, 503);
+    if(origin!==host&&response.headers.get('X-QuantOS-Market-Source')!=='binance-usdm')throw new Failure('BINANCE_RELAY_INVALID_SOURCE',503);
     try { return await response.json(); }
     catch { throw new Failure('BINANCE_INVALID_RESPONSE', 503); }
   })();
   if (ttl) {
     if (cache.size > 180) cache.clear();
-    cache.set(path, { until: Date.now() + ttl, value });
+    cache.set(url, { until: Date.now() + ttl, value });
   }
   try { return await value; }
-  catch (error) { cache.delete(path); throw error; }
+  catch (error) { cache.delete(url); throw error; }
 }
 
 export function symbolId(value: unknown) {
@@ -49,8 +63,8 @@ export function symbolId(value: unknown) {
   return value;
 }
 
-export async function contract(symbol: string) {
-  const data = await market('exchangeInfo', {}, 600000);
+export async function contract(env:MarketEnv,symbol: string) {
+  const data = await market(env,'exchangeInfo', {}, 600000);
   const item = data?.symbols?.find((row: any) => row.symbol === symbol);
   if (item?.status !== 'TRADING' || item.contractType !== 'PERPETUAL' || item.marginAsset !== 'USDT') throw new Failure('CONTRACT_NOT_TRADING');
   const lot = item.filters.find((row: any) => row.filterType === 'MARKET_LOT_SIZE');
@@ -61,8 +75,8 @@ export async function contract(symbol: string) {
     tick: price.tickSize as string, minNotional: (minimum?.notional ?? '0') as string };
 }
 
-export async function quote(symbol: string,budget?:MarketBudget) {
-  const row = await market('ticker/price', { symbol }, 1200,budget);
+export async function quote(env:MarketEnv,symbol: string,budget?:MarketBudget) {
+  const row = await market(env,'ticker/price', { symbol }, 1200,budget);
   if (row?.symbol !== symbol || !Number.isSafeInteger(row.time) || row.time > Date.now() + 500 || Date.now() - row.time > 15000)
     throw new Failure('STALE_BINANCE_QUOTE', 503);
   positive(row.price);
@@ -79,25 +93,25 @@ function candle(row: any, interval: number): Candle {
   return { time: row[0], end: row[6], open: row[1], high: row[2], low: row[3], close: row[4], volume: row[5] };
 }
 
-export async function candles(symbol: string, from: number, until: number,budget?:MarketBudget) {
+export async function candles(env:MarketEnv,symbol: string, from: number, until: number,budget?:MarketBudget) {
   const count = Math.min(90, Math.floor((until - from) / minute));
   if (count <= 0) return [];
   const params={symbol, interval:'1m', startTime:from, endTime:from+count*minute-1, limit:count};
   try {
-    const rows=await market('klines',params,50000,budget);
+    const rows=await market(env,'klines',params,50000,budget);
     if(!Array.isArray(rows)||rows.length!==count)throw new Failure('BINANCE_KLINE_GAP',503);
     const parsed=rows.map(row=>candle(row,minute));
     if(parsed.some((row,index)=>row.time!==from+index*minute))throw new Failure('BINANCE_KLINE_GAP',503);
     return parsed;
   } catch(error) {
-    cache.delete(marketPath('klines',params));
+    cache.delete(marketOrigin(env)+marketPath('klines',params));
     throw error;
   }
 }
 
 // Aggregate trades are used for the partial candle at entry and before a manual change.
 // Completed full minutes use the trade-price OHLC series, never mark-price OHLC.
-export async function partialTrades(symbol: string, from: number, until: number,budget?:MarketBudget): Promise<Candle[]> {
+export async function partialTrades(env:MarketEnv,symbol: string, from: number, until: number,budget?:MarketBudget): Promise<Candle[]> {
   if (until <= from) return [];
   const result: Candle[] = [];
   let previousId: number | undefined;
@@ -106,7 +120,7 @@ export async function partialTrades(symbol: string, from: number, until: number,
     const params: Record<string, number | string> = { symbol, limit: 1000 };
     if (previousId === undefined) Object.assign(params, { startTime: from, endTime: until - 1 });
     else params.fromId = previousId + 1;
-    const rows = await market('aggTrades', params, 1200,budget);
+    const rows = await market(env,'aggTrades', params, 1200,budget);
     if (!Array.isArray(rows) || rows.length > 1000) throw new Failure('INVALID_AGG_TRADES', 503);
     for (const row of rows) {
       if (!Number.isSafeInteger(row?.a) || !Number.isSafeInteger(row.T) || row.T < from || row.T < previousTime ||
@@ -122,13 +136,13 @@ export async function partialTrades(symbol: string, from: number, until: number,
   throw new Failure('BINANCE_PARTIAL_HISTORY_LIMIT', 503);
 }
 
-export async function marketContext(symbol: string) {
+export async function marketContext(env:MarketEnv,symbol: string) {
   const now = Date.now();
   const fifteen = 15 * minute, day = 24 * 60 * minute;
   const [latest, instrument, intraday, daily, mark, interest] = await Promise.all([
-    quote(symbol), contract(symbol), market('klines', { symbol, interval: '15m', limit: 64 }, 45000),
-    market('klines', { symbol, interval: '1d', limit: 32 }, 45000),
-    market('premiumIndex', { symbol }, 10000), market('openInterest', { symbol }, 10000),
+    quote(env,symbol), contract(env,symbol), market(env,'klines', { symbol, interval: '15m', limit: 64 }, 45000),
+    market(env,'klines', { symbol, interval: '1d', limit: 32 }, 45000),
+    market(env,'premiumIndex', { symbol }, 10000), market(env,'openInterest', { symbol }, 10000),
   ]);
   return { ...latest, instrument, markPrice: mark.markPrice, markTime: mark.time,
     fundingRate: mark.lastFundingRate, nextFundingTime: mark.nextFundingTime, openInterest: interest.openInterest,

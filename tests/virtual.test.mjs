@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { createMarketRelay } from '../scripts/binance-market-relay.mjs';
 
 const oneMinute=60000;
 const boundary=Math.floor(Date.now()/oneMinute)*oneMinute;
@@ -12,6 +13,9 @@ let mf, mcp, cookie, key, readKey;
 let price='0.001',quoteTime=Date.now(),bars=[],trades=[];
 const marketRequests=[];
 const json=value=>Response.json(value);
+const relayToken='fixture-only-quantos-market-relay-token';
+const relayMode=process.env.QUANTOS_TEST_MARKET_RELAY==='1';
+const relay=createMarketRelay(relayToken,{fetchUpstream:(url,options)=>outbound(new Request(url,options))});
 async function outbound(request){
  const u=new URL(request.url);marketRequests.push(u.pathname);
  assert.equal(u.origin,'https://fapi.binance.com');assert.equal(request.method,'GET');assert.equal(request.headers.has('X-MBX-APIKEY'),false);
@@ -26,8 +30,10 @@ async function outbound(request){
 before(async()=>{
  const codes=await Promise.all(['worker/index.ts','mcp/index.ts'].map(entry=>build({entryPoints:[entry],bundle:true,write:false,format:'esm',platform:'browser'})));
  mf=new Miniflare(convertV4MiniflareOptions({workers:[
-  {name:'api',modules:true,script:codes[0].outputFiles[0].text,compatibilityDate:'2026-11-01',d1Databases:['DB'],outboundService:outbound,
-   bindings:{ADMIN_PASSWORD:'test',SESSION_SECRET:'test',VIRTUAL_ONLY:'true',DEMO_TRADING_ENABLED:'true',MCP_DEMO_TRADING_ENABLED:'true'}},
+  {name:'api',modules:true,script:codes[0].outputFiles[0].text,compatibilityDate:'2026-11-01',d1Databases:['DB'],
+   outboundService:relayMode?(request)=>{assert.equal(new URL(request.url).origin,'https://relay.quant.test');return relay(request)}:outbound,
+   bindings:{ADMIN_PASSWORD:'test',SESSION_SECRET:'test',VIRTUAL_ONLY:'true',DEMO_TRADING_ENABLED:'true',MCP_DEMO_TRADING_ENABLED:'true',
+    ...(relayMode?{BINANCE_RELAY_ORIGIN:'https://relay.quant.test',BINANCE_RELAY_TOKEN:relayToken}:{})}},
   {name:'mcp',modules:true,script:codes[1].outputFiles[0].text,compatibilityDate:'2026-11-01',serviceBindings:{API:'api'}}]}));
  const db=await mf.getD1Database('DB','api');
  for(const file of ['0001.sql','0006_virtual.sql'])for(const sql of fs.readFileSync('migrations/'+file,'utf8').split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();

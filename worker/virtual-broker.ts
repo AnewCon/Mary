@@ -1,9 +1,9 @@
 import { Failure } from './exchange';
-import { candles, contract, minute, partialTrades, priceType, quote, source, symbolId, type MarketBudget } from './binance-market';
+import { candles, contract, minute, partialTrades, priceType, quote, source, symbolId, type MarketBudget, type MarketEnv } from './binance-market';
 import { abs, bps, decimal, div, max, min, mul, positive, roundDown, text } from './virtual-decimal';
 import { exit, fillPrice, pnl, protection, settleCandle, view, widenStop, type Position, type TradeEvent } from './virtual-model';
 
-interface Env { DB: D1Database }
+interface Env extends MarketEnv { DB: D1Database }
 interface Account { id:string; name:string; created_at:number; initial:string; wallet:string; realized:string; fees:string;
   peak:string; drawdown:string; fee_bps:number; slip_bps:number; deviation_bps:number }
 interface PositionRow { data:string }
@@ -188,7 +188,7 @@ async function createPosition(e:Env,b:any,id:string,actor:string) {
   const reason=requiredText(b.reason,2500),strategy=requiredText(b.strategy,80);
   const analysis=b.analysis??{};
   if(!analysis||typeof analysis!=='object'||Array.isArray(analysis)||JSON.stringify(analysis).length>6000)throw new Failure('INVALID_ANALYSIS');
-  const [instrument,latest]=await Promise.all([contract(symbol),quote(symbol)]);
+  const [instrument,latest]=await Promise.all([contract(e,symbol),quote(e,symbol)]);
   const market=positive(latest.price),tick=positive(instrument.tick),step=positive(instrument.step);
   const entry=fillPrice(market,tick,a.slip_bps,b.direction==='LONG');
   if(abs(entry-decisionPrice)>bps(decisionPrice,a.deviation_bps))throw new Failure('VIRTUAL_PRICE_DEVIATION',409);
@@ -215,13 +215,13 @@ async function createPosition(e:Env,b:any,id:string,actor:string) {
   return {statements,result:{requestId:id,status:'COMMITTED',position:view(p),shadows:[single.id,wide.id]}};
 }
 
-async function replay(p:Position,until:number,budget?:MarketBudget) {
+async function replay(e:Env,p:Position,until:number,budget?:MarketBudget) {
   const events:TradeEvent[]=[];
   if(p.closedAt!==null||p.cursor>=until)return events;
   const boundary=Math.ceil(p.cursor/minute)*minute;
   if(boundary>p.cursor){
     const end=Math.min(boundary,until);
-    for(const row of await partialTrades(p.symbol,p.cursor,end,budget)){
+    for(const row of await partialTrades(e,p.symbol,p.cursor,end,budget)){
       events.push(...settleCandle(p,row));
       if(p.closedAt!==null)break;
     }
@@ -229,14 +229,14 @@ async function replay(p:Position,until:number,budget?:MarketBudget) {
   }
   const lastClosed=Math.floor(until/minute)*minute;
   if(p.closedAt===null&&p.cursor<lastClosed){
-    for(const row of await candles(p.symbol,p.cursor,lastClosed,budget)){
+    for(const row of await candles(e,p.symbol,p.cursor,lastClosed,budget)){
       events.push(...settleCandle(p,row));
       p.cursor=row.end+1;
       if(p.closedAt!==null)break;
     }
   }
   if(p.closedAt===null&&p.cursor===lastClosed&&until>lastClosed){
-    for(const row of await partialTrades(p.symbol,p.cursor,until,budget)){
+    for(const row of await partialTrades(e,p.symbol,p.cursor,until,budget)){
       events.push(...settleCandle(p,row));
       if(p.closedAt!==null)break;
     }
@@ -258,9 +258,9 @@ export async function action(e:Env,b:any,actor:string) {
     }else if(b.action==='CLOSE'||b.action==='UPDATE_PROTECTION'){
       const p=await getPosition(e,b.positionId);
       if(p.shadowOf||p.closedAt!==null)throw new Failure('VIRTUAL_POSITION_NOT_EDITABLE',409);
-      const a=await getAccount(e,p.accountId),latest=await quote(p.symbol);
+      const a=await getAccount(e,p.accountId),latest=await quote(e,p.symbol);
       if(latest.time+1<p.cursor)throw new Failure('VIRTUAL_MARKET_OUT_OF_ORDER',409);
-      const events=await replay(p,latest.time+1);
+      const events=await replay(e,p,latest.time+1);
       if(p.closedAt===null&&p.cursor<latest.time+1)throw new Failure('VIRTUAL_CATCHUP_REQUIRED',409);
       if(p.closedAt===null){
         p.current=latest.price;p.markTime=latest.time;
@@ -347,11 +347,11 @@ export async function settle(e:Env) {
     for(const p of open){const group=groups.get(p.symbol)??[];group.push(p);groups.set(p.symbol,group)}
     for(const [symbol,group] of groups){
       let latest:Awaited<ReturnType<typeof quote>>|undefined,error:string|null=null;
-      try{latest=await quote(symbol,budget)}catch(err){error=err instanceof Failure?err.code:'VIRTUAL_QUOTE_FAILED'}
+      try{latest=await quote(e,symbol,budget)}catch(err){error=err instanceof Failure?err.code:'VIRTUAL_QUOTE_FAILED'}
       for(const original of group){
         const p=structuredClone(original);
         try{
-          const fills=await replay(p,until,budget);
+          const fills=await replay(e,p,until,budget);
           if(p.closedAt===null&&latest&&latest.time>=p.markTime){p.current=latest.price;p.markTime=latest.time}
           if(p.cursor<until&&p.closedAt===null)error??='VIRTUAL_CATCHUP_PENDING';
           if(!p.shadowOf&&fills.length){

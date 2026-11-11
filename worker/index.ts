@@ -1,12 +1,13 @@
 import {protectTiers,leverageInfo,tradeContext,orders as demoOrders,execute as demoExecute,actionStatus as demoActionStatus,mcpClose} from './demo-broker';
 import {createPlan,listPlans} from './plans';
 import * as virtual from './virtual-broker';
-import {marketContext,symbolId} from './binance-market';
+import {marketContext,symbolId,type MarketEnv} from './binance-market';
+import {readBinanceDemo,syncBinanceDemo,type BinanceDemoEnv} from './binance-demo';
 import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
 import {performance,history,syncPerformance,resetTodayEarnings} from './performance';
-interface Env{DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string;VIRTUAL_ONLY?:string}
+interface Env extends MarketEnv,BinanceDemoEnv{ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string;VIRTUAL_ONLY?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
 async function body(r:Request){const text=await r.text();if(new TextEncoder().encode(text).length>16384)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
@@ -15,6 +16,14 @@ async function auth(r:Request,e:Env,scope='read',sessionOnly=false){const cookie
 async function sync(e:Env){const lease=await e.DB.prepare("INSERT INTO system_settings(key,value) VALUES('sync_lock',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(value AS INTEGER)<? RETURNING value").bind(String(Date.now()),Date.now()-30000).first();if(!lease)throw new Failure('SYNC_IN_PROGRESS',409);try{const [balances,positions]=await Promise.all([okx(e,'/api/v5/account/balance'),okx(e,'/api/v5/account/positions?instType=SWAP')]);const a=balances[0];const data={account:{equity:a.totalEq,currency:'USD',details:a.details,source:'OKX API'},positions:positions.filter((p:any)=>Number(p.pos)!==0),updatedAt:now()};await e.DB.batch([e.DB.prepare('INSERT OR REPLACE INTO account_snapshots VALUES(1,?,?)').bind(JSON.stringify(data),data.updatedAt),e.DB.prepare('DELETE FROM positions'),...data.positions.map((p:any)=>e.DB.prepare('INSERT INTO positions VALUES(?,?)').bind(p.posId,JSON.stringify(p))),e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,NULL)').bind(now())]);return data}catch(err){const code=err instanceof Failure?err.code:'SYNC_NETWORK_FAILURE';await e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,?)').bind(now(),code).run();throw new Failure(code,503)}finally{await e.DB.prepare("DELETE FROM system_settings WHERE key='sync_lock'").run()}}
 async function route(r:Request,e:Env){const u=new URL(r.url),p=u.pathname,m=r.method;if(!p.startsWith('/api/'))return e.ASSETS.fetch(r);if(!['GET','POST'].includes(m))throw new Failure('METHOD_NOT_ALLOWED',405);if(m==='POST'&&r.headers.get('Origin')&&r.headers.get('Origin')!==u.origin)throw new Failure('ORIGIN_DENIED',403);
 if(p==='/api/login'&&m==='POST'){await limit(e,'login:'+r.headers.get('CF-Connecting-IP'),5);const b=await body(r);if(!e.ADMIN_PASSWORD||!e.SESSION_SECRET)throw new Failure('ADMIN_NOT_CONFIGURED',503);if(typeof b.password!=='string'||await hash(b.password)!==await hash(e.ADMIN_PASSWORD))throw new Failure('INVALID_LOGIN',401);const token=randomKey();await e.DB.prepare('INSERT INTO sessions VALUES(?,?)').bind(await hash(token),Date.now()+8*3600000).run();const out=json({authenticated:true});out.headers.set('Set-Cookie',`quantos=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return out}
+if(p.startsWith('/api/binance-demo/')){
+ await auth(r,e,'read',true);
+ if(p==='/api/binance-demo/status'&&m==='GET')return json({enabled:e.BINANCE_DEMO_ENABLED==='true'});
+ if(e.BINANCE_DEMO_ENABLED!=='true')throw new Failure('BINANCE_DEMO_DISABLED',404);
+ if(p==='/api/binance-demo/account'&&m==='GET')return json(await readBinanceDemo(e));
+ if(p==='/api/binance-demo/sync'&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await syncBinanceDemo(e))}
+ throw new Failure('NOT_FOUND',404);
+}
 const admin=p.startsWith('/api/keys')||p.startsWith('/api/trades/')||p==='/api/system/halt'||p==='/api/logout'||p==='/api/performance/today/reset'||p==='/api/settings/capital'||(m==='POST'&&['/api/virtual/accounts','/api/virtual/refresh'].includes(p));const principal=await auth(r,e,p.startsWith('/api/demo/')?'demo_trade':['/api/virtual/trade','/api/virtual/capabilities'].includes(p)?'virtual_trade':m==='GET'?'read':'write',admin);
 if(p.startsWith('/api/virtual/')){
  if(e.VIRTUAL_ONLY!=='true')throw new Failure('VIRTUAL_LEDGER_DISABLED',404);
@@ -24,7 +33,7 @@ if(p.startsWith('/api/virtual/')){
  if(p==='/api/virtual/portfolio'&&m==='GET')return json(await virtual.portfolio(e,u.searchParams.get('accountId')??undefined));
  if(p==='/api/virtual/stats'&&m==='GET')return json(await virtual.statistics(e,u.searchParams.get('accountId')??undefined));
  if(p==='/api/virtual/history'&&m==='GET')return json(await virtual.history(e,u.searchParams));
- if(p==='/api/virtual/market'&&m==='GET'){await limit(e,'virtual-market:'+principal,10);return json(await marketContext(symbolId(u.searchParams.get('symbol'))))}
+ if(p==='/api/virtual/market'&&m==='GET'){await limit(e,'virtual-market:'+principal,10);return json(await marketContext(e,symbolId(u.searchParams.get('symbol'))))}
  if(p==='/api/virtual/position'&&m==='GET')return json(await virtual.positionDetail(e,u.searchParams.get('id')||''));
  if(p==='/api/virtual/request'&&m==='GET')return json(await virtual.requestStatus(e,u.searchParams.get('id')||'',principal));
  if(p==='/api/virtual/refresh'&&m==='POST'){await limit(e,'virtual-refresh:'+principal,4);return json(await virtual.settle(e))}
@@ -83,4 +92,9 @@ if(p==='/api/trades/actions'&&m==='GET')return json((await e.DB.prepare('SELECT 
 if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(await reconcile(e,p.split('/')[4],sync));
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
-export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){ctx.waitUntil((async()=>{if(e.VIRTUAL_ONLY==='true'){try{await virtual.settle(e)}catch(err){console.error('virtual cron',err instanceof Failure?err.code:'VIRTUAL_CRON_ERROR')}}else{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
+export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){
+ if(e.BINANCE_DEMO_ENABLED==='true')ctx.waitUntil(syncBinanceDemo(e).catch(err=>{
+  console.error('binance demo cron',err instanceof Failure?err.code:'BINANCE_DEMO_SYNC_ERROR');
+ }));
+ ctx.waitUntil((async()=>{if(e.VIRTUAL_ONLY==='true'){try{await virtual.settle(e)}catch(err){console.error('virtual cron',err instanceof Failure?err.code:'VIRTUAL_CRON_ERROR')}}else{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())
+}};
