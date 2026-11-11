@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
+import BinanceDemoTradeForm from './BinanceDemoTradeForm';
 
 interface DemoAccount {
   configured: boolean;
+  tradingEnabled: boolean;
   stale: boolean;
   snapshot: {
     updatedAt: string;
@@ -36,7 +38,7 @@ const amount = (value?: string) => value == null ? '—' : Number(value).toLocal
 });
 
 export default function BinanceDemoDashboard({ api }: {
-  api: (path: string, body?: unknown) => Promise<DemoAccount>;
+  api: (path: string, body?: unknown) => Promise<any>;
 }) {
   const [data, setData] = useState<DemoAccount | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,7 +98,7 @@ export default function BinanceDemoDashboard({ api }: {
       </div>)}
     </div>
     <div className="panel">
-      <div className="panelhead"><h2>模拟盘当前持仓</h2><span className="badge">只读</span></div>
+      <div className="panelhead"><h2>模拟盘当前持仓</h2><span className="badge">币安模拟盘</span></div>
       {snapshot?.positions.length ? <div className="tablewrap"><table>
         <thead><tr>{['合约', '方向', '数量', '开仓价', '标记价', '未实现盈亏'].map(label => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>{snapshot.positions.map(position => <tr key={position.symbol + ':' + position.side}>
@@ -108,5 +110,7 @@ export default function BinanceDemoDashboard({ api }: {
         </tr>)}</tbody>
       </table></div> : <div className="empty">{snapshot ? '当前没有持仓' : '等待账户数据'}</div>}
     </div>
+    {data?.configured && data.tradingEnabled && <BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
+      onApplied={() => void refresh()} />}
   </>;
 }

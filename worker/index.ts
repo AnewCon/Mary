@@ -3,6 +3,7 @@ import {createPlan,listPlans} from './plans';
 import * as virtual from './virtual-broker';
 import {marketContext,symbolId,type MarketEnv} from './binance-market';
 import {readBinanceDemo,syncBinanceDemo,type BinanceDemoEnv} from './binance-demo';
+import {demoActionStatus as binanceDemoActionStatus,submitDemoAction} from './binance-demo-trades';
 import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
@@ -22,6 +23,10 @@ if(p.startsWith('/api/binance-demo/')){
  if(e.BINANCE_DEMO_ENABLED!=='true')throw new Failure('BINANCE_DEMO_DISABLED',404);
  if(p==='/api/binance-demo/account'&&m==='GET')return json(await readBinanceDemo(e));
  if(p==='/api/binance-demo/sync'&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await syncBinanceDemo(e))}
+ if(e.BINANCE_DEMO_TRADING_ENABLED==='true'){
+  if(p==='/api/binance-demo/action'&&m==='GET'){await limit(e,'binance-demo-status',10);return json(await binanceDemoActionStatus(e,u.searchParams.get('id')))}
+  if(p==='/api/binance-demo/action'&&m==='POST'){await limit(e,'binance-demo-action',8);return json(await submitDemoAction(e,await body(r)))}
+ }
  throw new Failure('NOT_FOUND',404);
 }
 const admin=p.startsWith('/api/keys')||p.startsWith('/api/trades/')||p==='/api/system/halt'||p==='/api/logout'||p==='/api/performance/today/reset'||p==='/api/settings/capital'||(m==='POST'&&['/api/virtual/accounts','/api/virtual/refresh'].includes(p));const principal=await auth(r,e,p.startsWith('/api/demo/')?'demo_trade':['/api/virtual/trade','/api/virtual/capabilities'].includes(p)?'virtual_trade':m==='GET'?'read':'write',admin);
