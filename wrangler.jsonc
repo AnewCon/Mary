@@ -23,9 +23,10 @@
     }
   ],
   "vars": {
-    "EXCHANGE": "OKX",
-    "TRADING_MODE": "simulation",
-    "DEMO_TRADING_ENABLED": "true",
-    "MCP_DEMO_TRADING_ENABLED": "true"
+    "EXCHANGE": "BINANCE",
+    "VIRTUAL_ONLY": "true",
+    "TRADING_MODE": "virtual",
+    "DEMO_TRADING_ENABLED": "false",
+    "MCP_DEMO_TRADING_ENABLED": "false"
   }
 }

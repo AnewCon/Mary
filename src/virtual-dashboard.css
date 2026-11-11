@@ -1,0 +1,23 @@
+.virtual-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 16px; }
+.virtual-controls label { display:flex; align-items:center; gap:8px; }
+.virtual-controls h2 { margin:0; }
+.virtual-hero { min-height:300px; padding-bottom:31px; }
+.virtual-hero .herobadges { flex-wrap:wrap; }
+.virtual-metrics { margin-top:18px; }
+.virtual-metrics .metric { min-width:0; }
+.virtual-metrics .metric b { overflow-wrap:anywhere; }
+.virtual-filters { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; padding:16px; }
+.virtual-filters label { display:grid; gap:5px; font-size:12px; }
+.virtual-filters input, .virtual-filters select, .virtual-filters textarea { width:150px; max-width:100%; }
+.virtual-filters textarea { min-width:175px; font:inherit; color:inherit; border:1px solid #b8cdc5; border-radius:6px; padding:10px; }
+.virtual-detail { max-width:790px; max-height:90vh; overflow:auto; }
+.virtual-detail h3 { margin-top:18px; }
+.virtual-detail pre { overflow:auto; }
+.virtual-reason { white-space:pre-wrap; }
+.virtual-summary { display:flex; flex-wrap:wrap; gap:8px 18px; margin-bottom:16px; }
+.virtual-events { display:grid; gap:10px; }
+.virtual-events small { display:block; }
+.virtual-chart { margin-top:16px; }
+.virtual-chart svg { display:block; width:100%; background:#eef5ef; border-radius:8px; padding:8px; }
+.virtual-chart text { font-size:9px; }
+@media(max-width:550px){.virtual-controls label{max-width:100%;flex-wrap:wrap}.virtual-filters{padding:12px}.virtual-hero{min-height:275px}}
