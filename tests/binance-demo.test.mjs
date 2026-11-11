@@ -11,6 +11,7 @@ test('Binance demo sync uses signed GETs, preserves the last snapshot, and requi
   const timestamp = Date.now();
   const seen = [];
   let blocked = false;
+  let serverOffset = 0;
   const mutations = [];
   const bundle = await build({ entryPoints: ['worker/index.ts'], bundle: true, write: false, format: 'esm' });
   const mf = new Miniflare(convertV4MiniflareOptions({
@@ -29,8 +30,7 @@ test('Binance demo sync uses signed GETs, preserves the last snapshot, and requi
       assert.equal(url.origin, 'https://demo-fapi.binance.com');
       if (url.pathname === '/fapi/v1/time') {
         assert.equal(request.headers.has('X-MBX-APIKEY'), false);
-        if (blocked) return new Response('<h1>403 Forbidden</h1>', { status: 403 });
-        return Response.json({ serverTime: timestamp });
+        return Response.json({ serverTime: Date.now() + serverOffset });
       }
       if (url.pathname === '/fapi/v1/exchangeInfo') {
         assert.equal(request.method, 'GET');
@@ -41,11 +41,15 @@ test('Binance demo sync uses signed GETs, preserves the last snapshot, and requi
       }
       assert.equal(request.headers.get('X-MBX-APIKEY'), apiKey);
       const signedAt = Number(url.searchParams.get('timestamp'));
-      assert.ok(signedAt >= timestamp && signedAt < timestamp + 5_000);
+      assert.ok(signedAt >= timestamp);
       assert.equal(url.searchParams.get('recvWindow'), '5000');
       const query = url.search.slice(1).split('&signature=')[0];
       const signature = createHmac('sha256', secretKey).update(query).digest('hex');
       assert.equal(url.search, `?${query}&signature=${signature}`);
+      if (blocked) return new Response('<h1>403 Forbidden</h1>', { status: 403 });
+      if (Math.abs(signedAt - (Date.now() + serverOffset)) > 5_000) {
+        return Response.json({ code: -1021 }, { status: 400 });
+      }
       if (url.pathname === '/fapi/v1/positionSide/dual') return Response.json({ dualSidePosition: false });
       if (url.pathname === '/fapi/v1/order') {
         const params = Object.fromEntries(url.searchParams);
@@ -94,19 +98,22 @@ test('Binance demo sync uses signed GETs, preserves the last snapshot, and requi
     const { snapshot } = JSON.parse(body).data;
     assert.equal(snapshot.account.walletBalance, '1000');
     assert.deepEqual(snapshot.positions.map(p => [p.symbol, p.side, p.unrealizedPnl]), [['BTCUSDT', 'SHORT', '-10']]);
-    assert.equal(seen[0], '/fapi/v1/time');
-    assert.deepEqual(seen.slice(1).sort(), ['/fapi/v3/account', '/fapi/v3/positionRisk']);
+    assert.deepEqual(seen.slice().sort(), ['/fapi/v3/account', '/fapi/v3/positionRisk']);
 
     blocked = true;
     const failure = await sync();
     assert.equal(failure.status, 502);
     assert.equal((await failure.json()).error.code, 'BINANCE_DEMO_HTTP_403');
     assert.equal(seen.length, 4);
-    assert.equal(seen.at(-1), '/fapi/v1/time');
+    assert.ok(!seen.includes('/fapi/v1/time'));
     const cached = await api('/binance-demo/account', { headers });
     assert.deepEqual((await cached.json()).data.snapshot, snapshot);
 
     blocked = false;
+    serverOffset = 20_000;
+    assert.equal((await sync()).status, 200);
+    assert.equal(seen.filter(path => path === '/fapi/v1/time').length, 1);
+    serverOffset = 0;
     const id = 'b'.repeat(32);
     const action = { kind: 'close', id, symbol: 'BTCUSDT', side: 'SHORT', percent: 25, confirm: true };
     const submit = payload => api('/binance-demo/action', { method: 'POST', headers, body: JSON.stringify(payload) });

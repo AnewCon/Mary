@@ -75,21 +75,35 @@ type WritePath = '/fapi/v1/order' | '/fapi/v1/leverage';
 
 export async function demoSigner(env: BinanceDemoEnv) {
   if (!configured(env)) throw new Failure('BINANCE_DEMO_CREDENTIALS_INCOMPLETE', 503);
-  const { serverTime } = row(await demoRequest('/fapi/v1/time'));
-  if (typeof serverTime !== 'number' || !Number.isSafeInteger(serverTime) || serverTime <= 0) {
-    throw new Failure('BINANCE_DEMO_INVALID_RESPONSE', 502);
-  }
-  const syncedAt = Date.now();
   const key = await crypto.subtle.importKey(
     'raw', encoder.encode(env.BINANCE_DEMO_SECRET_KEY!), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
-  return async (...[method, path, params]: ['GET', ReadPath, Record<string, string>?] | ['POST', WritePath, Record<string, string>]) => {
+  let clockOffset = 0;
+  let clockSync: Promise<void> | undefined;
+  async function send(method: 'GET' | 'POST', path: ReadPath | WritePath, params?: Record<string, string>) {
     const query = new URLSearchParams({
-      ...params, timestamp: String(serverTime + Date.now() - syncedAt), recvWindow: '5000',
+      ...params, timestamp: String(Date.now() + clockOffset), recvWindow: '5000',
     }).toString();
     const signed = await crypto.subtle.sign('HMAC', key, encoder.encode(query));
     const signature = Array.from(new Uint8Array(signed), byte => byte.toString(16).padStart(2, '0')).join('');
     return demoRequest(path + '?' + query + '&signature=' + signature, env.BINANCE_DEMO_API_KEY, method);
+  }
+  async function syncClock() {
+    const { serverTime } = row(await demoRequest('/fapi/v1/time'));
+    if (typeof serverTime !== 'number' || !Number.isSafeInteger(serverTime) || serverTime <= 0) {
+      throw new Failure('BINANCE_DEMO_INVALID_RESPONSE', 502);
+    }
+    clockOffset = serverTime - Date.now();
+  }
+  return async (...[method, path, params]: ['GET', ReadPath, Record<string, string>?] | ['POST', WritePath, Record<string, string>]) => {
+    try {
+      return await send(method, path, params);
+    } catch (error) {
+      // Binance explicitly rejected the timestamp before processing the operation.
+      if (!(error instanceof Failure) || error.code !== 'BINANCE_DEMO_API_-1021') throw error;
+      await (clockSync ??= syncClock());
+      return send(method, path, params);
+    }
   };
 }
 
