@@ -15,10 +15,12 @@
 
 也可在项目目录使用已被 Git 忽略的 `.env.binance-mcp` 本地配置文件。运行命令为 `node scripts/binance-mcp-local.mjs`。服务通过标准输入输出收发 MCP 消息。
 
+Windows 上也可以运行 `powershell.exe -NoProfile -File .\scripts\binance-mcp-windows.ps1 -Configure`。脚本会隐藏输入，通过 Windows 为当前用户加密保存币安密钥。配置后去掉 `-Configure` 即可启动，默认读取 Windows 本地代理设置。
+
 ## 接入 ChatGPT
 
 1. 在有权限的 OpenAI Platform 项目创建 Secure MCP Tunnel，并关联要使用的 ChatGPT 工作区。
-2. 在运行 QuantOS 的电脑上配置 `tunnel-client`，选择 stdio，启动命令填 `node`，参数填 `scripts/binance-mcp-local.mjs` 的绝对路径。把运行密钥填入客户端的本地安全配置。
+2. 在运行 QuantOS 的电脑上配置 `tunnel-client`，选择 stdio。若使用 Windows 加密配置，启动命令填 `powershell.exe`，参数依次填 `-NoProfile`、`-File` 和 `scripts/binance-mcp-windows.ps1` 的绝对路径。若使用环境变量启动，命令填 `node`，参数填 `scripts/binance-mcp-local.mjs` 的绝对路径。把 OpenAI 隧道运行密钥填入客户端的本地安全配置。
 3. 运行 `tunnel-client doctor --profile <名称> --explain`，确认客户端可连接。
 4. 在 ChatGPT 网页端打开 Plugins → Add custom MCP server → Connection → Tunnel，选择对应隧道。首次测试调用 `binance_demo_get_account`。
 
