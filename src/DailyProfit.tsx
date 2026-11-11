@@ -1,12 +1,17 @@
 import { RotateCcw } from 'lucide-react';
 
-type DailyEarnings = {
+export type DailyEarnings = {
   currencies: { currency: string; net: string; earned?: string; lost?: string }[];
   updatedAt: string | null;
   resetAt?: string | null;
   complete: boolean;
   error: string | null;
 };
+
+export function dailyUsdt(data?: DailyEarnings) {
+  if (!data?.updatedAt && !data?.resetAt) return undefined;
+  return data.currencies.find(currency => currency.currency === 'USDT');
+}
 
 const amountFormat = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -32,7 +37,7 @@ export default function DailyProfit({ data, onReset, resetDisabled }: {
   onReset: () => void;
   resetDisabled: boolean;
 }) {
-  const amount = data?.updatedAt || data?.resetAt ? data.currencies.find(c => c.currency === 'USDT') : undefined;
+  const amount = dailyUsdt(data);
   const total = Number(amount?.net);
   const totalTone = total < 0 ? 'today-loss' : total > 0 ? 'today-gain' : '';
   const from = data?.resetAt ? timeFormat.format(new Date(data.resetAt)) : '00:00';

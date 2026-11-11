@@ -1,21 +1,22 @@
 import { useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
+import { dailyUsdt, type DailyEarnings } from './DailyProfit';
 import './equity-animation.css';
 
 export const scenes = [
   { id: 'stone', name: '石头', range: '亏损 10% 及以上' },
   { id: 'coins', name: '钢镚堆', range: '亏损不足 10%' },
-  { id: 'note', name: '一张红钞票', range: '与本金持平' },
+  { id: 'note', name: '一张红钞票', range: '今日净收益为零' },
   { id: 'change', name: '红钞票和钢镚', range: '盈利不足 5%' },
   { id: 'stack', name: '红钞票堆', range: '盈利 5% 及以上' },
 ] as const;
 
-export function equityState(equity: unknown, capital: unknown) {
-  if (equity == null || equity === '' || capital == null || capital === '') return null;
-  const current = Number(equity);
+function dailyReturnState(net: string | undefined, capital: string | null | undefined) {
+  if (!net || !capital) return null;
+  const profit = Number(net);
   const principal = Number(capital);
-  if (!Number.isFinite(current) || !Number.isFinite(principal) || principal <= 0) return null;
-  const change = (current - principal) / principal;
+  if (!Number.isFinite(profit) || !Number.isFinite(principal) || principal <= 0) return null;
+  const change = profit / principal;
   const index = change <= -0.1 ? 0 : change < 0 ? 1 : change === 0 ? 2 : change < 0.05 ? 3 : 4;
   return { change, scene: scenes[index] };
 }
@@ -26,14 +27,14 @@ const percent = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 2,
 });
 
-export default function EquityAnimation({ equity, capital, stale, onConfigure }: {
-  equity: unknown;
+export default function EquityAnimation({ today, capital, onConfigure }: {
+  today?: DailyEarnings;
   capital?: string | null;
-  stale?: boolean;
   onConfigure: () => void;
 }) {
-  const state = equityState(equity, capital);
+  const state = dailyReturnState(dailyUsdt(today)?.net, capital);
   const scene = state?.scene ?? scenes[2];
+  const syncLabel = today?.error ? ' · 已同步账单' : !today?.complete ? ' · 账单同步中' : '';
 
   return (
     <section className="panel equity-animation" aria-labelledby="equity-animation-title">
@@ -49,13 +50,13 @@ export default function EquityAnimation({ equity, capital, stale, onConfigure }:
         <h2 id="equity-animation-title">盈收状态</h2>
         {state ? (
           <>
-            <div className="equity-label">权益较本金</div>
+            <div className="equity-label">今日净收益 ÷ 本金基准</div>
             <div className="equity-reading">
               <strong className={state.change < 0 ? 'red' : state.change > 0 ? 'green' : ''}>{percent.format(state.change)}</strong>
-              <span>{scene.name}{stale ? ' · 最近快照' : ''}</span>
+              <span>{scene.name}{syncLabel}</span>
             </div>
           </>
-        ) : <p>{capital ? '等待账户权益同步' : '设置本金后显示权益涨跌'}</p>}
+        ) : <p>{capital ? '等待今日收益同步' : '设置本金后显示今日收益率'}</p>}
         <button type="button" className="equity-configure" onClick={onConfigure}>
           {capital ? '调整本金' : '设置本金'} <ArrowUpRight size={14} aria-hidden="true" />
         </button>
@@ -74,11 +75,11 @@ export function CapitalSettings({ capital, busy, onSave }: {
   return (
     <section className="panel settings capital-settings">
       <h2>盈收动画</h2>
-      <p>按（总权益 − 本金）÷ 本金切换场景。总权益包含浮动盈亏。入金或出金后，可更新本金基准。</p>
+      <p>按（今日赚取 + 今日亏损）÷ 本金基准切换场景。今日亏损按负数计。</p>
       <form onSubmit={event => { event.preventDefault(); onSave(value.trim()); }}>
-        <label htmlFor="capital-usd">本金基准（USD）</label>
+        <label htmlFor="capital-reference">本金基准（USDT）</label>
         <div className="capital-input">
-          <input id="capital-usd" type="number" min="0.01" max="999999999999.99" step="0.01"
+          <input id="capital-reference" type="number" min="0.01" max="999999999999.99" step="0.01"
             inputMode="decimal" value={value} required onChange={event => setDraft(event.target.value)}/>
           <button className="primary" disabled={busy}>保存本金</button>
         </div>
