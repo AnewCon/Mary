@@ -15,6 +15,14 @@ test('platform key is shown once and stored only as hash',async()=>{const create
 test('API read/write works but keys cannot control trades or halt',async()=>{assert.equal((await request('/status',undefined,key,false)).r.status,200);const saved=await request('/ai/decisions',{content:'Integration test',symbol:'BTC-USDT-SWAP',source:'test'},key,false);assert.equal(saved.r.status,200);assert.equal((await request('/ai/decisions',undefined,key,false)).j.data.length,1);assert.equal((await request('/system/halt',{},key,false)).r.status,401);assert.equal((await request('/trades/test/close',{confirm:true},key,false)).r.status,401);assert.equal((await request('/keys',undefined,key,false)).r.status,401)});
 test('trade scopes and invalid records are rejected',async()=>{assert.equal((await request('/keys',{name:'unsafe',scopes:['trade']})).r.status,400);assert.equal((await request('/ai/logs',{content:3},key,false)).r.status,400);assert.equal((await request('/ai/logs',{content:'x'.repeat(17000)},key,false)).r.status,413)});
 test('read-only keys cannot write and revocation takes effect',async()=>{const read=await request('/keys',{name:'reader',scopes:['read']});assert.equal((await request('/ai/logs',{content:'denied'},read.j.data.key,false)).r.status,401);await request('/keys/'+id+'/revoke',{});assert.equal((await request('/status',undefined,key,false)).r.status,401)});
+test('capital reference persists and is editable only with an authenticated session',async()=>{
+ assert.equal((await request('/status')).j.data.capitalUsd,null);
+ const platform=(await request('/keys',{name:'capital-test',scopes:['read','write']})).j.data.key;
+ assert.equal((await request('/settings/capital',{capitalUsd:'100000'},platform,false)).r.status,401);
+ for(const capitalUsd of ['0','-1','1e4','12.345',100])assert.equal((await request('/settings/capital',{capitalUsd})).r.status,400);
+ assert.equal((await request('/settings/capital',{capitalUsd:'100000'})).j.data.capitalUsd,'100000.00');
+ assert.equal((await request('/status')).j.data.capitalUsd,'100000.00');
+});
 test('logout invalidates the session',async()=>{await request('/logout',{});assert.equal((await request('/status')).r.status,401)});
 
 
