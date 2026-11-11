@@ -1,23 +1,18 @@
-.hero-right {
-  display: flex;
-  flex: 0 0 clamp(142px, 16vw, 216px);
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  position: relative;
-  z-index: 1;
-  margin-left: 16px;
-}
 .equity-animation {
-  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(76px, 45%) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 6px;
+  width: min(100%, 285px);
+  margin-bottom: 12px;
   color: #f3faf5;
 }
+.hero .syncinfo { flex-shrink: 0; margin-left: 16px; }
 .equity-art { position: relative; aspect-ratio: 16 / 9; }
 .equity-frame { position: absolute; inset: 0; opacity: 0; transition: opacity .75s ease; }
 .equity-frame.visible { opacity: 1; }
 .equity-frame img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 2px 2px #182f3980); }
-.equity-caption { padding: 0 10px 6px; text-shadow: 0 1px 2px #122933, 0 0 5px #122933; }
+.equity-caption { min-width: 0; padding: 0 4px 0 0; text-shadow: 0 1px 2px #122933, 0 0 5px #122933; }
 .equity-label, .equity-reading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .equity-label { font-size: 11px; font-weight: 650; color: #f6fffb; }
 .equity-label button { padding: 2px; color: inherit; border: 0; background: transparent; box-shadow: none; filter: drop-shadow(0 1px 2px #122933); }
@@ -31,9 +26,3 @@
 .equity-legend { display: flex; flex-wrap: wrap; gap: 12px 22px; margin: 17px 0 0; }
 .equity-legend dt { font-size: 12px; font-weight: 650; }
 .equity-legend dd { margin: 3px 0 0; color: #597771; font-size: 11px; }
-@media (max-width: 780px) {
-  .hero:has(.hero-right) { display: block; padding-bottom: 25px; }
-  .hero-right { margin: 15px 0 0; align-items: stretch; gap: 12px; }
-  .hero-right .syncinfo { position: static; }
-  .equity-animation { max-width: 310px; }
-}
