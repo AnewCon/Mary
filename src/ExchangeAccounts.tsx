@@ -17,7 +17,7 @@ type PaperOrder = { id:string; symbol:string; side:string; quantity:string; entr
 type PaperLedger = { initial:string|null; balance:string|null; available:string|null; realized:string; unrealized:string; orders:PaperOrder[]; closedCount:number };
 const beijingTime = (time:number) => new Date(time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'});
 
-export function BinancePaperLedger({ api }: { api: Api }) {
+export function BinancePaperLedger({ api, positionsOnly = false }: { api: Api; positionsOnly?: boolean }) {
   const [ledger, setLedger] = useState<PaperLedger|null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,14 +37,22 @@ export function BinancePaperLedger({ api }: { api: Api }) {
   }
 
   const lastQuote = ledger?.orders.reduce((latest, order) => Math.max(latest, order.markAt), 0) ?? 0;
+  const openOrders = ledger?.orders.filter(order => !order.closedAt) ?? [];
   return <section className="panel exchange-panel">
-      <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安虚拟账户收益</h2>
+      <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>{positionsOnly ? '币安虚拟持仓' : '币安虚拟账户收益'}</h2>
         <p>{lastQuote ? '最近记录行情 · ' + beijingTime(lastQuote) + '（北京时间）' : '订单估值随 Chat 写入更新'}</p></div>
         <button disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '读取最新记录'}</button></div>
       <div className="exchange-body">
         {error && <p role="alert">{error}</p>}
         {ledger?.initial === null && <p>尚未设置初始资金。请在 Chat 中指定模拟本金后开仓。</p>}
-        {ledger?.initial != null && <><div className="metrics">
+        {positionsOnly && ledger?.initial != null && (openOrders.length ? <div className="phone-position-list">
+          {openOrders.map(order => <article className="phone-position" key={order.id}>
+            <div><strong>{order.symbol}</strong><span>{order.side === 'LONG' ? '多仓' : '空仓'} · 1×</span></div>
+            <dl><div><dt>数量</dt><dd>{order.quantity}</dd></div><div><dt>开仓价</dt><dd>{order.entry}</dd></div>
+              <div><dt>最新记录价</dt><dd>{order.mark}</dd></div><div><dt>浮动盈亏</dt><dd className={Number(order.pnl) < 0 ? 'red' : Number(order.pnl) > 0 ? 'green' : undefined}>{order.pnl} USDT</dd></div></dl>
+          </article>)}
+        </div> : <p>暂无未平仓订单。</p>)}
+        {!positionsOnly && ledger?.initial != null && <><div className="metrics">
           {([['已实现盈亏',ledger.realized,true],['未实现盈亏',ledger.unrealized,true],['账户余额',ledger.balance,false],['可用余额',ledger.available,false]] as const).map(([name,value,isPnl]) =>
             <div className="metric" key={name}><div>{name}</div><b className={isPnl&&Number(value)!==0?(Number(value)<0?'red':'green'):undefined}>{value}</b><small>USDT</small></div>)}
         </div>

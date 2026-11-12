@@ -42,3 +42,39 @@
   .account-ledger-switcher { grid-template-columns: 1fr; gap: 8px; }
   .account-ledger-choice { min-height: 62px; padding: 10px 12px; }
 }
+
+@media (max-width: 780px) {
+  aside.phone-shell { padding: 14px 14px 10px; }
+  .phone-shell > nav, .phone-main .title, .phone-main footer { display: none; }
+  .phone-main > header { height: 46px; padding-inline: 14px; }
+  .phone-main > header > span { font-size: 12px; }
+  .phone-main > .content { padding: 12px clamp(10px, 3.5vw, 22px) 24px; }
+  .phone-primary, .phone-exchanges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 10px;
+    padding: 0;
+    overflow: visible;
+  }
+  .phone-primary button, .phone-exchanges button { justify-content: center; min-height: 44px; min-width: 0; padding: 6px; font-size: 13px; }
+  .phone-primary button[aria-pressed="true"] { background: #365c50; color: #fff; border-color: #365c50; }
+  .phone-exchanges .okx[aria-pressed="true"] { background: #dcece1; color: #244b44; border-color: #47725d; }
+  .phone-exchanges .binance[aria-pressed="true"] { background: #faedc5; color: #644c17; border-color: #89651f; }
+  .phone-dashboard .panelhead { padding: 12px; gap: 8px; }
+  .phone-dashboard .exchange-body { padding: 12px; }
+  .phone-dashboard .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+  .phone-dashboard .metric { min-width: 0; min-height: 76px; padding: 10px; }
+  .phone-dashboard .metric > b { font-size: clamp(14px, 4.5vw, 20px); margin: 7px 0; overflow-wrap: anywhere; }
+  .phone-dashboard .ledger-intro { padding: 8px; min-height: auto; align-items: stretch; background: #e5efe9; margin-bottom: 10px; }
+  .phone-dashboard .ledger-intro > div:first-child { display: none; }
+  .phone-dashboard .ledger-intro > div:last-child { justify-content: space-between; }
+  .phone-dashboard .tablewrap { max-width: 100%; }
+  .phone-position-list { display: grid; gap: 8px; }
+  .phone-position { min-width: 0; padding: 10px; border: 1px solid #b9ccc4; border-radius: 8px; background: #f5faf6; }
+  .phone-position > div:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+  .phone-position dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 8px 0 0; }
+  .phone-position dt { color: #55776c; font-size: 11px; }
+  .phone-position dd { margin: 1px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+  .phone-position > button { width: 100%; margin-top: 10px; min-height: 44px; justify-content: center; }
+}
