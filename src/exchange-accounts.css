@@ -1,0 +1,12 @@
+.exchange-mark{display:inline-block;vertical-align:middle;flex-shrink:0}
+.exchange-mark.binance{color:#ad7700}
+.exchange-mark.okx{color:#244b44}
+.exchange-binance{background:#fbefca;color:#745600;border-color:#dfca82}
+.exchange-panel .panelhead{flex-wrap:wrap}
+.exchange-panel .panelhead p,.exchange-body{font-size:13px;line-height:1.6}
+.exchange-body{padding:16px 24px 24px}
+.exchange-body p{margin:0 0 10px}
+.exchange-body pre,.exchange-body textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8cdc5;border-radius:6px;background:#f1f6ee;color:#244b44;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+.exchange-body textarea{resize:vertical}
+.exchange-body form{display:grid;gap:10px;margin-top:16px}
+.exchange-body form button{justify-self:start}
