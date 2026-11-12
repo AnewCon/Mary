@@ -1,9 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import BinanceDemoDashboard from './BinanceDemoDashboard';
 import './exchange-accounts.css';
 
 type Api = (path: string, body?: unknown) => Promise<any>;
-const reviewSource = 'quantos:binance:chat-paper-review:v1';
 
 export function ExchangeMark({ exchange }: { exchange: 'okx' | 'binance' }) {
   const binance = exchange === 'binance';
@@ -14,75 +13,63 @@ export function ExchangeMark({ exchange }: { exchange: 'okx' | 'binance' }) {
   </svg>;
 }
 
+type PaperOrder = { id:string; symbol:string; side:string; quantity:string; entry:string; mark:string; pnl:string; markAt:number; closedAt?:number };
+type PaperLedger = { initial:string|null; balance:string|null; available:string|null; realized:string; unrealized:string; orders:PaperOrder[]; closedCount:number };
+const beijingTime = (time:number) => new Date(time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'});
+
 export function BinanceWorkspace({ api }: { api: Api }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [review, setReview] = useState<{ text: string; savedAt: string }>();
-  const [draft, setDraft] = useState('');
+  const [ledger, setLedger] = useState<PaperLedger|null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
   useEffect(() => {
     let active = true;
     void api('/binance-demo/status').then(status => {
       if (active) setEnabled(status.enabled === true);
     }).catch(() => { if (active) setEnabled(false); });
-    void api('/ai/logs').then((records: { data: string; created_at: string }[]) => {
-      for (const row of records) {
-        try {
-          const log = JSON.parse(row.data);
-          if (log.source === reviewSource && typeof log.content === 'string') {
-            if (active) setReview({ text: log.content, savedAt: row.created_at });
-            break;
-          }
-        } catch { /* Skip old malformed log entries. */ }
-      }
-    }).catch(() => { if (active) setError('暂时无法读取已保存的复盘。'); })
-      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [api]);
+  useEffect(() => {
+    let active = true;
+    void api('/paper/orders').then(data => {if(active) setLedger(data);})
+      .catch(() => {if(active) setError('暂时无法读取虚拟订单。');})
+      .finally(() => {if(active) setLoading(false);});
+    return () => {active = false;};
+  }, [api]);
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || saving) return;
-    setSaving(true);
-    setError('');
-    try {
-      await api('/ai/logs', { source: reviewSource, content });
-      setReview({ text: content, savedAt: new Date().toISOString() });
-      setDraft('');
-    } catch {
-      setError('复盘保存失败，请重试。');
-    } finally {
-      setSaving(false);
-    }
+  async function refresh() {
+    setLoading(true); setError('');
+    try { setLedger(await api('/paper/orders')); }
+    catch { setError('暂时无法读取虚拟订单。'); }
+    finally { setLoading(false); }
   }
 
   return <div className="exchange-workspace">
     <section className="panel exchange-panel">
-      <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安虚拟账户 · Chat 账本</h2>
-        <p>Chat 复盘时计算币安虚拟账户的余额、持仓和盈亏。这里保留你发布的复盘快照。</p></div>
-        <span className="badge exchange-binance">按次发布</span></div>
+      <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安虚拟账户 · 订单账本</h2>
+        <p>Chat 读取币安行情后，通过 QuantOS 保存和更新虚拟订单。网站只读取已保存的数据。</p></div>
+        <button disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '读取最新记录'}</button></div>
       <div className="exchange-body">
-        {loading ? <p>正在读取上次复盘…</p> : review ? <>
-          <p>快照保存于 {new Date(review.savedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）</p>
-          <pre>{review.text}</pre>
-        </> : <p>暂无已发布的复盘。</p>}
-        <form onSubmit={save}>
-          <label htmlFor="binance-review">粘贴 Chat 复盘摘要</label>
-          <textarea id="binance-review" value={draft} onChange={event => setDraft(event.target.value)}
-            placeholder="建议包含账户余额、未平仓仓位、已实现盈亏，以及本次复盘时间" maxLength={4000} rows={4}/>
-          <button className="primary" disabled={loading || saving || !draft.trim()}>{saving ? '保存中…' : '保存复盘快照'}</button>
-        </form>
         {error && <p role="alert">{error}</p>}
+        {ledger?.initial === null && <p>尚未设置初始资金。请在 Chat 中指定模拟本金后开仓。</p>}
+        {ledger?.initial != null && <><div className="metrics">
+          {([['余额',ledger.balance],['可用余额',ledger.available],['已实现盈亏',ledger.realized],['未实现盈亏',ledger.unrealized]] as const).map(([name,value]) =>
+            <div className="metric" key={name}><div>{name}</div><b>{value}</b><small>USDT</small></div>)}
+        </div>
+        <p>行情由 Chat 提交。1 倍模拟，不含手续费、资金费和滑点。显示全部未平仓及最近 40 笔已平仓。</p>
+        {ledger.orders.length ? <div className="tablewrap"><table><thead><tr>
+          {['合约','方向','状态','数量','开仓价','最新记录价','盈亏 (USDT)','行情时间（北京）'].map(name=><th key={name}>{name}</th>)}
+        </tr></thead><tbody>{ledger.orders.map(o=><tr key={o.id}>
+          <td>{o.symbol}<small>{o.id}</small></td><td>{o.side==='LONG'?'多':'空'}</td><td>{o.closedAt?'已平仓':'持仓中'}</td>
+          <td>{o.quantity}</td><td>{o.entry}</td><td>{o.mark}</td><td>{o.pnl}</td><td>{beijingTime(o.markAt)}</td>
+        </tr>)}</tbody></table></div> : <p>暂无虚拟订单。</p>}</>}
       </div>
     </section>
     <section className="panel exchange-panel">
       <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安 USDⓈ-M 模拟盘 · API 接入</h2>
         <p>交易所模拟账户。接入后独立展示余额、仓位和未实现盈亏。</p></div>
         <span className="badge exchange-binance">{enabled === null ? '检查配置中' : enabled ? '接口已启用' : '待接入'}</span></div>
-      {enabled === false && <div className="exchange-body"><p>预留给未来的 VPS。需部署币安模拟盘后端，并在服务端配置模拟盘凭证；启用前不会发起币安账户请求。</p></div>}
+      {enabled === false && <div className="exchange-body"><p>预留给未来的 VPS。需部署币安模拟盘后端，并在服务端配置模拟盘凭证。</p></div>}
     </section>
     {enabled && <BinanceDemoDashboard api={api}/>}
   </div>;
