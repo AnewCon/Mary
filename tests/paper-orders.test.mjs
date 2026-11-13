@@ -37,3 +37,26 @@ test('paper orders persist, mark once, settle separately from OKX, and deduplica
   assert.equal(final.available,'82');
   assert.equal(sql.prepare("SELECT value FROM system_settings WHERE key='capital_usd'").get().value,'80');
 });
+test('leveraged positions keep weighted cost, ROI and liquidation risk across adds',async()=>{
+  const {db} = database();
+  await writePaperOrder(db,{action:'INITIALIZE',requestId:id(),initial:'1000'});
+  const orderId=id(), priceTime=Date.now(), symbol='BTCUSDT';
+  const open={action:'OPEN',requestId:orderId,symbol,side:'LONG',margin:'20',price:'100',priceTime,leverage:10};
+  await assert.rejects(writePaperOrder(db,{...open,leverage:126}),/PAPER_INVALID_LEVERAGE/);
+  const first=await writePaperOrder(db,open);
+  assert.equal(first.orders[0].quantity,'2');
+  const add={action:'ADD',requestId:id(),orderId,symbol,margin:'12',price:'120',priceTime};
+  await assert.rejects(writePaperOrder(db,{...add,leverage:20}),/PAPER_LEVERAGE_MISMATCH/);
+  await writePaperOrder(db,add);
+  const retry=await writePaperOrder(db,add);
+  assert.equal(retry.orders[0].quantity,'3');
+  assert.equal(retry.orders[0].entry,'106.666666666666');
+  assert.equal(retry.orders[0].pnl,'40');
+  assert.equal(retry.orders[0].marginRoiPct,'125');
+  assert.equal(retry.orders[0].liquidationPrice,'96.482412060301');
+  const marked=await writePaperOrder(db,{action:'MARK',requestId:id(),orderId,symbol,price:'96',priceTime});
+  assert.equal(marked.orders[0].liquidationRisk,'AT_RISK');
+  const short=await writePaperOrder(db,{...open,requestId:id(),side:'SHORT',leverage:125});
+  assert.equal(short.orders[1].quantity,'25');
+  assert.equal(short.orders[1].liquidationPrice,'100.298507462686');
+});
