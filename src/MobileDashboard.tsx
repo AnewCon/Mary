@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, Layers } from 'lucide-react';
 import { BinancePaperLedger, ExchangeMark } from './ExchangeAccounts';
 import Performance from './Performance';
+import PaperReviews from './PaperReviews';
 
 const phoneQuery = '(max-width: 780px)';
 
@@ -36,7 +37,7 @@ export default function MobileDashboard({ api, okxPositions, performance }: Prop
       <button type="button" className="binance" aria-pressed={exchange === 'binance'} onClick={() => setExchange('binance')}><ExchangeMark exchange="binance"/>币安虚拟账户</button>
     </div>
     {exchange === 'binance'
-      ? <BinancePaperLedger api={api} positionsOnly={panel === 'positions'}/>
+      ? <><BinancePaperLedger api={api} positionsOnly={panel === 'positions'}/>{panel === 'earnings' && <PaperReviews api={api}/>}</>
       : panel === 'positions' ? okxPositions : <Performance {...performance}/>}
   </section>;
 }

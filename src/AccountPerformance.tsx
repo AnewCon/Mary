@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { BinancePaperLedger, ExchangeMark } from './ExchangeAccounts';
 import Performance from './Performance';
+import PaperReviews from './PaperReviews';
 
 type Props = Parameters<typeof Performance>[0] & {
   api: (path: string, body?: unknown) => Promise<unknown>;
@@ -27,7 +28,7 @@ export default function AccountPerformance({ api, ...performance }: Props) {
       </button>)}
     </div>
     <div id="account-ledger-panel">
-      {selected === 'okx' ? <Performance {...performance}/> : <BinancePaperLedger api={api}/>}
+      {selected === 'okx' ? <Performance {...performance}/> : <><BinancePaperLedger api={api}/><PaperReviews api={api}/></>}
     </div>
   </>;
 }

@@ -10,6 +10,11 @@
 .exchange-body textarea{resize:vertical}
 .exchange-body form{display:grid;gap:10px;margin-top:16px}
 .exchange-body form button{justify-self:start}
+.paper-review{padding:12px 14px;margin-bottom:8px;background:#f5faf6;border:1px solid #b8cdc5;border-radius:8px;overflow-wrap:anywhere}
+.paper-review summary{cursor:pointer;color:#244b44;min-height:32px}
+.paper-review summary small{display:block;color:#55776c;margin:4px 0}
+.paper-review h3{font-size:13px;margin:12px 0 4px}
+.paper-review p{white-space:pre-wrap}
 
 .account-ledger-switcher {
   display: grid;
