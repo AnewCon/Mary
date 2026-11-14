@@ -83,11 +83,11 @@ export default function BinanceDemoDashboard({ api }: {
       <div className="panelhead">
         <div>
           <h2>币安 USDⓈ-M 模拟账户</h2>
-          <p>{updated ? `北京时间 ${updated} · ${data.stale ? '数据待更新' : '每 60 秒同步'}`
+          <p>{updated ? `北京时间 ${updated} · ${data.stale ? '数据待更新' : 'VPS 每 60 秒上传'}`
             : data?.configured === false ? '等待配置模拟盘密钥' : '等待首次同步'}</p>
         </div>
         <button className="primary" disabled={busy || !data?.configured} onClick={() => void refresh()}>
-          <RefreshCw size={15}/>{busy ? '同步中…' : '立即刷新'}
+          <RefreshCw size={15}/>{busy ? '同步中…' : '读取最新快照'}
         </button>
       </div>
     </div>

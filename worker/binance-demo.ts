@@ -50,9 +50,9 @@ function decimal(value: unknown): string {
   return value;
 }
 
-export async function fetchDemoSnapshot(env: BinanceDemoEnv) {
+export async function fetchDemoSnapshot(env: BinanceDemoEnv, supplied?: (method: 'GET',path: '/fapi/v3/account'|'/fapi/v3/positionRisk')=>Promise<unknown>) {
   const startedAt = new Date().toISOString();
-  const signed = await demoSigner(env);
+  const signed = supplied ?? await demoSigner(env);
   const [accountData, positionData] = await Promise.all([
     signed('GET', '/fapi/v3/account'), signed('GET', '/fapi/v3/positionRisk'),
   ]);

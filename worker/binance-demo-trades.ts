@@ -14,7 +14,7 @@ function requestId(value: unknown): string {
   return value;
 }
 
-function decode(input: unknown): { id: string; action: DemoAction } {
+export function decode(input: unknown): { id: string; action: DemoAction } {
   if (!input || typeof input !== 'object') throw new Failure('INVALID_DEMO_ACTION');
   const { kind, id, symbol, side, quantity, leverage, percent, confirm } = input as Record<string, unknown>;
   if (confirm !== true) throw new Failure('BINANCE_DEMO_CONFIRMATION_REQUIRED');
