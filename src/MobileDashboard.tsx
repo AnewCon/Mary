@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, Layers } from 'lucide-react';
-import { BinancePaperLedger, ExchangeMark } from './ExchangeAccounts';
+import { ExchangeMark } from './ExchangeAccounts';
+import BinanceDemoDashboard from './BinanceDemoDashboard';
 import Performance from './Performance';
-import PaperReviews from './PaperReviews';
 
 const phoneQuery = '(max-width: 780px)';
 
@@ -33,11 +33,11 @@ export default function MobileDashboard({ api, okxPositions, performance }: Prop
       <button type="button" aria-pressed={panel === 'earnings'} onClick={() => setPanel('earnings')}><BookOpen size={17}/>收益</button>
     </nav>
     <div className="phone-exchanges" role="group" aria-label="选择账户">
-      <button type="button" className="okx" aria-pressed={exchange === 'okx'} onClick={() => setExchange('okx')}><ExchangeMark exchange="okx"/>欧易账户</button>
-      <button type="button" className="binance" aria-pressed={exchange === 'binance'} onClick={() => setExchange('binance')}><ExchangeMark exchange="binance"/>币安虚拟账户</button>
+      <button type="button" className="okx" aria-pressed={exchange === 'okx'} onClick={() => setExchange('okx')}><ExchangeMark exchange="okx"/>欧易模拟账户</button>
+      <button type="button" className="binance" aria-pressed={exchange === 'binance'} onClick={() => setExchange('binance')}><ExchangeMark exchange="binance"/>币安模拟账户</button>
     </div>
     {exchange === 'binance'
-      ? <><BinancePaperLedger api={api} positionsOnly={panel === 'positions'}/>{panel === 'earnings' && <PaperReviews api={api}/>}</>
+      ? <BinanceDemoDashboard api={api} view={panel}/>
       : panel === 'positions' ? okxPositions : <Performance {...performance}/>}
   </section>;
 }
