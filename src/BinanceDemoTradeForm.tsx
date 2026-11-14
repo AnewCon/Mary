@@ -12,6 +12,7 @@ type Outcome = {
 };
 type Side = 'LONG' | 'SHORT';
 const states: Record<string, string> = {
+  queued: '等待 VPS 领取', running: 'VPS 执行中', expired: '请求过期，未被领取', not_found: '未找到请求',
   pending: '等待交易所确认', acknowledged: '交易所已回应',
   unknown: '结果待确认，请查询原请求', rejected: '交易所拒绝请求',
 };

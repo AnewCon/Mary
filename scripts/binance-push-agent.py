@@ -13,7 +13,7 @@ class Upstream(Exception):
 
 def request(url,headers,method='GET',body=None):
     try:
-        with http.open(urllib.request.Request(url,headers=headers,method=method,data=body),timeout=15) as r:
+        with http.open(urllib.request.Request(url,headers={'User-Agent':'QuantOS-VPS/1.0',**headers},method=method,data=body),timeout=15) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         try: code=json.load(e).get('code')
