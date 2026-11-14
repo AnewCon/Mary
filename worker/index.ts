@@ -1,3 +1,5 @@
+import { readBinanceDemo, syncBinanceDemo, type BinanceDemoEnv } from './binance-demo';
+import { demoActionStatus as binanceActionStatus, submitDemoAction } from './binance-demo-trades';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
 import { paperOrders, writePaperOrder } from './paper-orders';
 import {protectTiers,leverageInfo,tradeContext,orders as demoOrders,execute as demoExecute,actionStatus as demoActionStatus,mcpClose} from './demo-broker';
@@ -6,7 +8,7 @@ import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
 import {performance,history,syncPerformance,resetTodayEarnings} from './performance';
-interface Env{DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
+interface Env extends BinanceDemoEnv {DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
 async function body(r:Request){const text=await r.text();if(new TextEncoder().encode(text).length>16384)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
@@ -20,6 +22,24 @@ if(p==='/api/paper/reviews'&&m==='GET'){await auth(r,e,'read');return json(await
 if(p==='/api/paper/reviews'&&m==='POST'){const principal=await auth(r,e,'write');await limit(e,'paper-reviews:'+principal,10);return json(await savePaperReview(e.DB,await body(r)))}
 if(p==='/api/paper/orders'&&m==='GET'){await auth(r,e,'read');return json(await paperOrders(e.DB))}
 if(p==='/api/paper/orders'&&m==='POST'){const principal=await auth(r,e,'write');await limit(e,'paper:'+principal,20);return json(await writePaperOrder(e.DB,await body(r)))}
+if(p.startsWith('/api/binance-demo/')){
+  const write=m==='POST'&&p.endsWith('/action');
+  const access=await auth(r,e,write?'demo_trade':'read',m==='POST'&&!write);
+  const enabled=Boolean(e.BINANCE_DEMO_RELAY_TOKEN);
+  const tradingEnabled=enabled&&e.MCP_DEMO_TRADING_ENABLED==='true';
+  if(p.endsWith('/status')&&m==='GET')return json({enabled});
+  if(p.endsWith('/capabilities')&&m==='GET'){
+    await auth(r,e,'demo_trade');
+    return json({enabled:tradingEnabled});
+  }
+  if(!enabled)throw new Failure('BINANCE_DEMO_DISABLED',404);
+  const binance={...e,BINANCE_DEMO_TRADING_ENABLED:tradingEnabled?'true':'false'};
+  if(p.endsWith('/account')&&m==='GET')return json(access==='session'?await readBinanceDemo(binance):await syncBinanceDemo(binance));
+  if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await syncBinanceDemo(binance))}
+  if(tradingEnabled&&p.endsWith('/action')&&m==='GET')return json(await binanceActionStatus(binance,u.searchParams.get('id')));
+  if(tradingEnabled&&write){await limit(e,'binance-demo-action',8);return json(await submitDemoAction(binance,await body(r)))}
+  throw new Failure('NOT_FOUND',404);
+}
 const admin=p.startsWith('/api/keys')||p.startsWith('/api/trades/')||p==='/api/system/halt'||p==='/api/logout'||p==='/api/performance/today/reset'||p==='/api/settings/capital';const principal=await auth(r,e,p.startsWith('/api/demo/')?'demo_trade':m==='GET'?'read':'write',admin);
 if(p==='/api/logout'&&m==='POST'){const token=r.headers.get('Cookie')?.match(/quantos=([^;]+)/)?.[1];if(token)await e.DB.prepare('DELETE FROM sessions WHERE hash=?').bind(await hash(token)).run();const out=json({});out.headers.set('Set-Cookie','quantos=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return out}
 if(p==='/api/settings/capital'&&m==='POST'){
@@ -57,4 +77,5 @@ if(p==='/api/trades/actions'&&m==='GET')return json((await e.DB.prepare('SELECT 
 if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(await reconcile(e,p.split('/')[4],sync));
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
-export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
+export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){if(e.BINANCE_DEMO_RELAY_TOKEN)ctx.waitUntil(syncBinanceDemo(e).catch(()=>{}));
+ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
