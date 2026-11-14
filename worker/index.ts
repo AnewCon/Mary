@@ -28,11 +28,12 @@ if(p.startsWith('/api/binance-demo/')){
     const secret=e.BINANCE_DEMO_RELAY_TOKEN;
     if(!secret||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
     if(p.endsWith('/snapshot'))return json(await publishDemoSnapshot(e,await body(r)));
-    if(p.endsWith('/claim'))return json(e.MCP_DEMO_TRADING_ENABLED==='true'?await claimDemo(e.DB):null);
+    if(p.endsWith('/claim'))return json(await claimDemo(e.DB,e.MCP_DEMO_TRADING_ENABLED==='true'));
     if(p.endsWith('/result'))return json(await reportDemo(e.DB,await body(r)));
     throw new Failure('NOT_FOUND',404);
   }
-  await auth(r,e,write?'demo_trade':'read',m==='POST'&&!write);
+  const query=m==='POST'&&p.endsWith('/query');
+  await auth(r,e,write?'demo_trade':'read',m==='POST'&&!write&&!query);
   const enabled=Boolean(e.BINANCE_DEMO_RELAY_TOKEN);
   const tradingEnabled=enabled&&e.MCP_DEMO_TRADING_ENABLED==='true';
   if(p.endsWith('/status')&&m==='GET')return json({enabled});
@@ -44,7 +45,8 @@ if(p.startsWith('/api/binance-demo/')){
   const binance={...e,BINANCE_DEMO_TRADING_ENABLED:tradingEnabled?'true':'false'};
   if(p.endsWith('/account')&&m==='GET')return json(await readBinanceDemo(binance));
   if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await readBinanceDemo(binance))}
-  if(tradingEnabled&&p.endsWith('/action')&&m==='GET')return json(await queuedDemoStatus(e.DB,u.searchParams.get('id')));
+  if(query){const input=await body(r);if(!['orders','contract','query'].includes(input?.kind))throw new Failure('INVALID_DEMO_QUERY');await limit(e,'binance-demo-query',15);return json(await enqueueDemo(e.DB,input))}
+  if(p.endsWith('/action')&&m==='GET')return json(await queuedDemoStatus(e.DB,u.searchParams.get('id')));
   if(tradingEnabled&&write){await limit(e,'binance-demo-action',8);return json(await enqueueDemo(e.DB,await body(r)))}
   throw new Failure('NOT_FOUND',404);
 }

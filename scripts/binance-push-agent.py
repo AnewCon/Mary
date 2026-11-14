@@ -50,6 +50,26 @@ def execute(job):
     action=job['action']
     kind=action['kind']
     symbol=action['symbol']
+
+    if kind=='contract':
+        item=next((p for p in exchange('/fapi/v1/exchangeInfo')['symbols'] if p['symbol']==symbol),None)
+        if not item: raise Upstream('CONTRACT_NOT_FOUND')
+        return {'symbol':symbol,'status':item['status'],'contractType':item['contractType'],
+                'filters':item['filters'],'configuration':exchange('/fapi/v1/symbolConfig',params={'symbol':symbol}),
+                'positionMode':exchange('/fapi/v1/positionSide/dual')}
+    if kind=='orders':
+        return {'openOrders':exchange('/fapi/v1/openOrders',params={'symbol':symbol})[:20],
+                'openProtection':exchange('/fapi/v1/openAlgoOrders',params={'symbol':symbol})[:20],
+                'recentOrders':exchange('/fapi/v1/allOrders',params={'symbol':symbol,'limit':10})}
+    if kind=='query':
+        return exchange('/fapi/v1/order',params={'symbol':symbol,'orderId':action['exchangeOrderId']})
+    if kind=='cancel':
+        if action['conditional']:
+            order=exchange('/fapi/v1/algoOrder',params={'algoId':action['exchangeOrderId']})
+            if order['symbol']!=symbol: raise Upstream('ORDER_SYMBOL_MISMATCH')
+            return exchange('/fapi/v1/algoOrder','DELETE',{'algoId':action['exchangeOrderId']})
+        return exchange('/fapi/v1/order','DELETE',{'symbol':symbol,'orderId':action['exchangeOrderId']})
+
     if kind=='leverage':
         result=exchange('/fapi/v1/leverage','POST',{'symbol':symbol,'leverage':action['leverage']})
         return {'leverage':result['leverage'],'symbol':result['symbol']}
@@ -62,6 +82,22 @@ def execute(job):
     def direction(position):
         return position['positionSide'] if hedge else 'LONG' if Decimal(position['positionAmt'])>0 else 'SHORT'
     params={'symbol':symbol,'positionSide':position_side,'type':'MARKET','newClientOrderId':'qos_'+job['id'],'newOrderRespType':'RESULT'}
+
+    if kind=='protect':
+        position=next((p for p in active if direction(p)==side),None)
+        if not position: raise Upstream('POSITION_CHANGED')
+        closing_side='SELL' if side=='LONG' else 'BUY'
+        existing=exchange('/fapi/v1/openAlgoOrders',params={'symbol':symbol})
+        if any(p.get('positionSide')==position_side and p.get('side')==closing_side and
+               p.get('orderType')==action['protection'] and p.get('closePosition') in (True,'true') for p in existing):
+            raise Upstream('PROTECTION_ALREADY_EXISTS')
+        result=exchange('/fapi/v1/algoOrder','POST',{'algoType':'CONDITIONAL','symbol':symbol,'side':closing_side,
+            'positionSide':position_side,'type':action['protection'],'triggerPrice':action['triggerPrice'],
+            'workingType':'MARK_PRICE','closePosition':'true','clientAlgoId':'qos_'+job['id']})
+        if result.get('clientAlgoId')!='qos_'+job['id'] or result.get('symbol')!=symbol:
+            raise ValueError('Invalid protection response')
+        return {'algoId':str(result['algoId']),'algoStatus':result.get('algoStatus'),'triggerPrice':result.get('triggerPrice')}
+
     if kind=='close':
         position=next((p for p in active if direction(p)==side),None)
         if not position: raise Upstream('POSITION_CHANGED')
@@ -74,11 +110,12 @@ def execute(job):
         if quantity<=0 or quantity<Decimal(lot['minQty']): raise Upstream('QUANTITY_TOO_SMALL')
         params['quantity']=format(quantity,'f')
         if not hedge: params['reduceOnly']='true'
-    elif kind=='open':
+    elif kind in {'open','limit'}:
         if not hedge and any(direction(p)!=side for p in active): raise Upstream('OPPOSITE_POSITION')
         params['quantity']=action['quantity']
+        if kind=='limit': params.update(type='LIMIT',price=action['price'],timeInForce='GTC')
     else: raise Upstream('INVALID_ACTION')
-    params['side']='BUY' if (side=='LONG')==(kind=='open') else 'SELL'
+    params['side']='BUY' if (side=='LONG')==(kind in {'open','limit'}) else 'SELL'
     result=exchange('/fapi/v1/order','POST',params)
     if result.get('clientOrderId')!=params['newClientOrderId'] or result.get('symbol')!=symbol:
         raise ValueError('Invalid order response')
@@ -89,7 +126,7 @@ def process(job):
     result={'id':job['id']}
     try: result.update(state='acknowledged',result=execute(job))
     except Upstream as e:
-        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'POSITION_CHANGED','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION'}
+        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'POSITION_CHANGED','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS'}
         result.update(state='rejected' if certain else 'unknown',result={'code':str(e.code)})
     except Exception: result.update(state='unknown',result={'code':'VERIFY_BINANCE_BEFORE_RETRY'})
     tmp=spool.with_suffix('.tmp')

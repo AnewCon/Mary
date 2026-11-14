@@ -6,7 +6,12 @@ type OrderSide = 'LONG' | 'SHORT';
 type DemoAction =
   | { kind: 'open'; symbol: string; side: OrderSide; quantity: string }
   | { kind: 'close'; symbol: string; side: OrderSide; percent: number }
-  | { kind: 'leverage'; symbol: string; leverage: number };
+  | { kind: 'leverage'; symbol: string; leverage: number }
+  | {kind:'orders'|'contract';symbol:string}
+  | {kind:'query';symbol:string;exchangeOrderId:string}
+  | {kind:'limit';symbol:string;side:OrderSide;quantity:string;price:string}
+  | {kind:'protect';symbol:string;side:OrderSide;triggerPrice:string;protection:'STOP_MARKET'|'TAKE_PROFIT_MARKET'}
+  | {kind:'cancel';symbol:string;exchangeOrderId:string;conditional:boolean};
 type ActionRecord = { id: string; payload: string; state: string; result: string | null };
 
 function requestId(value: unknown): string {
@@ -16,10 +21,20 @@ function requestId(value: unknown): string {
 
 export function decode(input: unknown): { id: string; action: DemoAction } {
   if (!input || typeof input !== 'object') throw new Failure('INVALID_DEMO_ACTION');
-  const { kind, id, symbol, side, quantity, leverage, percent, confirm } = input as Record<string, unknown>;
-  if (confirm !== true) throw new Failure('BINANCE_DEMO_CONFIRMATION_REQUIRED');
+  const { kind, id, symbol, side, quantity, leverage, percent, confirm, price, triggerPrice, protection, exchangeOrderId, conditional } = input as Record<string, unknown>;
+  if (!['orders','contract','query'].includes(String(kind)) && confirm !== true) throw new Failure('BINANCE_DEMO_CONFIRMATION_REQUIRED');
   if (typeof symbol !== 'string' || !/^[A-Z0-9]{2,24}USDT$/.test(symbol)) throw new Failure('INVALID_SYMBOL');
   const request = requestId(id);
+
+  if(kind==='orders'||kind==='contract')return {id:request,action:{kind,symbol}};
+  if((kind==='query'||kind==='cancel')&&typeof exchangeOrderId==='string'&&/^\d{1,22}$/.test(exchangeOrderId)){
+    return {id:request,action:kind==='query'?{kind,symbol,exchangeOrderId}:{kind,symbol,exchangeOrderId,conditional:conditional===true}};
+  }
+  if(side==='LONG'||side==='SHORT'){
+    if(kind==='limit')return {id:request,action:{kind,symbol,side,quantity:text(positive(quantity)),price:text(positive(price))}};
+    if(kind==='protect'&&(protection==='STOP_MARKET'||protection==='TAKE_PROFIT_MARKET'))
+      return {id:request,action:{kind,symbol,side,protection,triggerPrice:text(positive(triggerPrice))}};
+  }
   if (kind === 'leverage' && typeof leverage === 'number' && Number.isInteger(leverage) && leverage >= 1 && leverage <= 125) {
     return { id: request, action: { kind, symbol, leverage } };
   }
@@ -93,6 +108,7 @@ export async function demoActionStatus(env: BinanceDemoEnv, value: unknown) {
 
 export async function submitDemoAction(env: BinanceDemoEnv, input: unknown) {
   const { id, action } = decode(input);
+  if(action.kind!=='open'&&action.kind!=='close'&&action.kind!=='leverage')throw new Failure('INVALID_DEMO_ACTION');
   const payload = JSON.stringify(action);
   const existing = await actionRow(env, id);
   if (existing) {

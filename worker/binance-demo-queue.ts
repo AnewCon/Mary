@@ -37,11 +37,11 @@ export async function queuedDemoStatus(db:D1Database,id:unknown) {
   return {id,state:row.state,result:row.result?JSON.parse(row.result):null};
 }
 
-export async function claimDemo(db:D1Database) {
+export async function claimDemo(db:D1Database, tradingEnabled: boolean) {
   const cutoff=new Date(Date.now()-120000).toISOString();
   const row=await db.prepare(`UPDATE binance_demo_actions SET state='running'
-    WHERE id=(SELECT id FROM binance_demo_actions WHERE state='queued' AND created_at>=? ORDER BY created_at,id LIMIT 1)
-    RETURNING id,payload`).bind(cutoff).first<{id:string;payload:string}>();
+    WHERE id=(SELECT id FROM binance_demo_actions WHERE state='queued' AND created_at>=? AND (?=1 OR json_extract(payload,'$.kind') IN ('orders','contract','query')) ORDER BY created_at,id LIMIT 1)
+    RETURNING id,payload`).bind(cutoff,tradingEnabled?1:0).first<{id:string;payload:string}>();
   return row?{id:row.id,action:JSON.parse(row.payload)}:null;
 }
 
