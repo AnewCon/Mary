@@ -13,10 +13,12 @@ import urllib.request
 from decimal import Decimal
 from pathlib import Path
 from tkinter import ttk, messagebox
+from quantos_hello import HelloRequest, load_credentials, store_credentials
 
 CLOUD = "https://marya-4j3.pages.dev/api/binance-live/agent/"
 BINANCE = "https://fapi.binance.com"
 TOKEN_FILE = Path(os.environ["LOCALAPPDATA"]) / "QuantOS" / "desktop.token"
+HISTORY_FILE = TOKEN_FILE.with_name("binance-history.dpapi")
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -99,8 +101,8 @@ class Panel:
     def __init__(self,root):
         self.root=root
         root.title("QuantOS | 本地执行面板")
-        root.geometry("760x565")
-        root.minsize(660,525)
+        root.geometry("760x615")
+        root.minsize(660,580)
         root.configure(bg="#101c27")
         icon=Path(__file__).with_name("QuantOS.png")
         if icon.exists():
@@ -117,7 +119,7 @@ class Panel:
         frame.pack(fill="both",expand=True)
         frame.columnconfigure(1,weight=1)
         ttk.Label(frame,text="QuantOS 本地执行面板",style="Title.TLabel").grid(row=0,columnspan=3,sticky="w")
-        ttk.Label(frame,text="币安 USDⓈ-M 真实账户  ·  本地签名与逐笔确认").grid(row=1,columnspan=3,sticky="w",pady=(4,15))
+        ttk.Label(frame,text="币安 USDⓈ-M 真实账户  ·  本地签名与订单执行").grid(row=1,columnspan=3,sticky="w",pady=(4,15))
         self.fields={}
         for i,label in enumerate(("币安 API Key","币安 Secret Key","本机 HTTP 代理"),2):
             ttk.Label(frame,text=label).grid(row=i,column=0,sticky="w",padx=(0,12),pady=5)
@@ -125,23 +127,77 @@ class Panel:
             widget.grid(row=i,column=1,columnspan=2,sticky="ew",pady=5)
             self.fields[label]=widget
         ttk.Label(frame,text="直连此栏留空。仅按你选择的网络发送 请求。".replace("发送 请求","发送请求")).grid(row=5,columnspan=3,sticky="w",pady=(0,8))
+        options=ttk.Frame(frame)
+        options.grid(row=6,columnspan=3,sticky="ew",pady=(0,8))
+        self.remember=tk.BooleanVar(value=False)
+        self.remember_box=ttk.Checkbutton(options,text="连接成功后保存密钥到此电脑",variable=self.remember)
+        self.remember_box.pack(side="left",padx=(0,10))
+        self.history=ttk.Button(options,text="使用历史密钥",command=self.unlock_history)
+        self.history.pack(side="left")
+        self.history.configure(state="normal" if HISTORY_FILE.is_file() else "disabled")
+        self.hello=None
         self.status=tk.StringVar(value="离线")
-        ttk.Label(frame,textvariable=self.status).grid(row=6,columnspan=3,sticky="w",pady=6)
+        ttk.Label(frame,textvariable=self.status).grid(row=7,columnspan=3,sticky="w",pady=6)
         self.summary=tk.StringVar(value="等待请求")
-        ttk.Label(frame,textvariable=self.summary,wraplength=645).grid(row=8,columnspan=3,sticky="w",pady=(15,8))
-        self.connect=ttk.Button(frame,text="连接 QuantOS",command=self.start)
-        self.connect.grid(row=7,column=0,sticky="w")
-        self.approve=ttk.Button(frame,text="确认并发送真实订单",command=lambda:self.decide(True),state="disabled")
-        self.approve.grid(row=9,column=0,sticky="w")
-        self.reject=ttk.Button(frame,text="拒绝",command=lambda:self.decide(False),state="disabled")
-        self.reject.grid(row=9,column=1,sticky="w",padx=8)
-        ttk.Label(frame,text="关闭面板会断开连接。已提交给币安的挂单仍由交易所管理。").grid(row=10,columnspan=3,sticky="w",pady=10)
+        ttk.Label(frame,textvariable=self.summary,wraplength=645).grid(row=9,columnspan=3,sticky="w",pady=(15,8))
+        self.connect=tk.Button(frame,command=self.start,relief="flat",bd=0,
+            font=("Microsoft YaHei UI",10,"bold"),padx=14,pady=7,cursor="hand2",
+            highlightthickness=2,highlightbackground="#101c27",highlightcolor="#d7fff4")
+        self.set_connection("idle")
+        self.connect.grid(row=8,column=0,sticky="w")
+        ttk.Label(frame,text="连接后自动执行 Chat 已确认的请求。关闭面板停止接收新请求。").grid(row=10,columnspan=3,sticky="w",pady=10)
         self.events=queue.Queue()
-        self.decisions=queue.Queue()
         self.stop=threading.Event()
-        self.job=None
         root.protocol("WM_DELETE_WINDOW",self.close)
         root.after(180,self.render)
+
+    def set_connection(self,state):
+        settings={
+            "idle":("连接 QuantOS","#2563a7",tk.NORMAL),
+            "connecting":("连接中…","#2563a7",tk.DISABLED),
+            "connected":("已连接","#16734c",tk.DISABLED),
+            "failed":("连接失败 · 重试","#a92f39",tk.NORMAL),
+        }
+        label,color,enabled=settings[state]
+        self.connect.configure(text=label,bg=color,fg="#ffffff",activebackground=color,
+                               activeforeground="#ffffff",disabledforeground="#ffffff",state=enabled)
+
+    def unlock_history(self):
+        if self.hello is not None or not HISTORY_FILE.is_file():
+            return
+        try:
+            self.hello=HelloRequest(self.root.winfo_id())
+        except OSError:
+            messagebox.showerror("Windows Hello", "无法启动 Windows Hello。请检查 Windows 登录选项，或手动输入密钥。")
+            return
+        self.history.configure(state="disabled")
+        self.connect.configure(state="disabled")
+        self.root.after(160,self.poll_hello)
+
+    def poll_hello(self):
+        try:
+            outcome=self.hello.poll()
+        except OSError:
+            outcome=False
+        if outcome is None:
+            self.root.after(160,self.poll_hello)
+            return
+        self.hello.close()
+        self.hello=None
+        self.history.configure(state="normal")
+        self.connect.configure(state="normal")
+        if not outcome:
+            self.status.set("未通过 Windows Hello 验证，历史密钥保持锁定。")
+            return
+        try:
+            key,secret=load_credentials(HISTORY_FILE)
+        except (OSError,ValueError):
+            messagebox.showerror("历史密钥", "无法用当前 Windows 用户读取历史密钥，请手动输入。")
+            return
+        for field,value in zip(list(self.fields.values())[:2],(key,secret)):
+            field.delete(0,"end")
+            field.insert(0,value)
+        self.status.set("Windows Hello 验证通过，已填入历史密钥。")
 
     def start(self):
         key,secret,proxy=[w.get().strip() for w in self.fields.values()]
@@ -159,96 +215,101 @@ class Panel:
         try:
             token=TOKEN_FILE.read_text(encoding="ascii").strip()
         except OSError:
+            self.set_connection("failed")
             messagebox.showerror("未配对", "缺少 QuantOS 本机配对文件。")
             return
         for w in self.fields.values():
             w.delete(0,"end")
             w.configure(state="disabled")
-        self.connect.configure(state="disabled")
+        remember=self.remember.get()
+        self.history.configure(state="disabled")
+        self.remember_box.configure(state="disabled")
+        self.set_connection("connecting")
         self.status.set("正在验证 API 权限及网络…")
-        threading.Thread(target=self.run,args=(Connection(token,key,secret,proxy),bool(proxy)),daemon=True).start()
+        threading.Thread(target=self.run,args=(Connection(token,key,secret,proxy),bool(proxy),(key,secret) if remember else None),daemon=True).start()
 
-    def run(self,c,proxied):
+    def run(self,c,proxied,remember=None):
         opened=False
         try:
             with c.opener.open(urllib.request.Request("https://www.cloudflare.com/cdn-cgi/trace",headers={"User-Agent":"QuantOS-Desktop/1.0"}),timeout=9) as r:
                 ip=str(ipaddress.IPv4Address(next(l[3:] for l in r.read().decode().splitlines() if l.startswith("ip="))))
             c.snapshot()
             opened=True
-            self.events.put(("status",f"在线 · {'本机代理' if proxied else '直连'} · 公网 IPv4 {ip}"))
+
+            announced=False
             until=time.monotonic()+60
             while not self.stop.is_set():
                 job=c.cloud("heartbeat",{"ready":True})
-                self.events.put(("job",job))
-                try:
-                    chosen,approved=self.decisions.get(timeout=12)
-                except queue.Empty:
-                    chosen=None
+                if not announced:
+                    self.events.put(("connection","connected"))
+                    self.events.put(("status",f"在线 · {'本机代理' if proxied else '直连'} · 公网 IPv4 {ip}"))
+                    announced=True
+                    if remember:
+                        try:
+                            store_credentials(HISTORY_FILE,*remember)
+                        except OSError:
+                            self.events.put(("status","已连接 · 历史密钥保存失败"))
+                        finally:
+                            remember=None
                 if self.stop.is_set():
                     break
-                if chosen:
-                    if not approved:
-                        c.cloud("result",{"id":chosen["id"],"state":"declined"})
+                if job:
+                    try:
+                        claimed=c.cloud("claim",{"id":job["id"]})
+                    except ApiError as error:
+                        if error.code not in {"LIVE_REQUEST_UNAVAILABLE","LIVE_REQUEST_CONFLICT","LIVE_REQUEST_NOT_FOUND"}:
+                            raise
                     else:
-                        c.cloud("claim",{"id":chosen["id"]})
-                        try:
-                            outcome=c.execute(chosen)
-                        except Exception as e:
-                            code=error_code(e)
-                            rejected=isinstance(e,ApiError) and (isinstance(e.code,int) and -10000<e.code<-1000 and e.code not in {-1001,-1006,-1007}
-                                or code in {"ONE_WAY_MODE_REQUIRED","OPPOSITE_POSITION_REQUIRES_REDUCE_ONLY"})
-                            c.cloud("result",{"id":chosen["id"],"state":"rejected" if rejected else "unknown","result":{"code":code}})
-                            self.events.put(("status","订单结果 "+code))
-                        else:
-                            c.cloud("result",{"id":chosen["id"],"state":"accepted","result":outcome})
-                            self.events.put(("status","币安已回应 · 订单 "+outcome["orderId"]+" · "+str(outcome["status"])))
-                    self.events.put(("job",None))
-                    until=0
+                        self.events.put(("order",f'执行中 · {claimed["order"]["symbol"]} · {claimed["id"]}'))
+                        self.submit_claimed(c,claimed)
+                        until=0
                 if time.monotonic()>=until:
                     c.snapshot()
                     until=time.monotonic()+60
+                self.stop.wait(5)
         except Exception as e:
-            self.events.put(("status","离线 · "+error_code(e)))
+            self.events.put(("status","连接失败 · "+error_code(e)))
         finally:
             if opened:
                 try: c.cloud("heartbeat",{"ready":False})
                 except Exception: pass
             self.events.put(("reset",None))
 
+    def submit_claimed(self,c,job):
+        if self.stop.is_set():
+            c.cloud("result",{"id":job["id"],"state":"rejected","result":{"code":"DESKTOP_CLOSED_BEFORE_SUBMISSION"}})
+            return
+        try:
+            outcome=c.execute(job)
+        except Exception as error:
+            code=error_code(error)
+            definitive=isinstance(error,ApiError) and (
+                isinstance(error.code,int) and -10000<error.code<-1000
+                and error.code not in {-1001,-1006,-1007}
+                or code in {"ONE_WAY_MODE_REQUIRED","OPPOSITE_POSITION_REQUIRES_REDUCE_ONLY"})
+            c.cloud("result",{"id":job["id"],"state":"rejected" if definitive else "unknown","result":{"code":code}})
+            self.events.put(("order",("订单未提交 · " if definitive else "结果未确认 · 请核对交易所 · ")+code))
+        else:
+            c.cloud("result",{"id":job["id"],"state":"accepted","result":outcome})
+            self.events.put(("order","币安已回应 · 订单 "+outcome["orderId"]+" · "+str(outcome["status"])))
+
     def render(self):
         while not self.events.empty():
             kind,data=self.events.get()
+            if kind=="connection": self.set_connection(data)
             if kind=="status": self.status.set(data)
-            if kind=="job":
-                self.job=data
-                state="normal" if data else "disabled"
-                self.approve.configure(state=state)
-                self.reject.configure(state=state)
-                if data:
-                    o=data["order"]
-                    purpose="只减仓" if o["reduceOnly"] else "开仓或同向加仓"
-                    self.summary.set(f'{o["symbol"]} · {o["side"]} · {o["type"]} · {purpose}\n数量 {o["quantity"]}   限价 {o.get("price","—")}\n请求编号 {data["id"]}')
-                else: self.summary.set("等待请求")
+            if kind=="order": self.summary.set(data)
             if kind=="reset":
-                self.job=None
-                self.approve.configure(state="disabled")
-                self.reject.configure(state="disabled")
-                for w in self.fields.values(): w.configure(state="normal")
-                self.connect.configure(state="normal")
+                for field in self.fields.values(): field.configure(state="normal")
+                self.history.configure(state="normal" if HISTORY_FILE.is_file() else "disabled")
+                self.remember_box.configure(state="normal")
+                self.set_connection("failed")
         self.root.after(180,self.render)
 
-    def decide(self,approved):
-        if not self.job: return
-        payload=self.job
-        if approved and not messagebox.askyesno("确认真实交易",self.summary.get()+"\n\n发送到币安真实账户？",default="no"):
-            return
-        if not self.job or self.job["id"]!=payload["id"]:
-            return
-        self.approve.configure(state="disabled")
-        self.reject.configure(state="disabled")
-        self.decisions.put((payload,approved))
-
     def close(self):
+        if self.hello:
+            self.hello.close(cancel=True)
+            self.hello=None
         self.stop.set()
         self.root.destroy()
 

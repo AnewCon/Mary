@@ -27,7 +27,7 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
   }, [load]);
   return <section className="panel exchange-panel">
     <div className="panelhead"><div><h2>币安真实账户</h2>
-      <p>{agent===null?'检查本地面板':agent?'本地面板在线 · 可接收待确认请求':'本地面板离线或未就绪'}</p>
+      <p>{agent===null?'检查本地面板':agent?'本地面板在线 · 自动执行已确认请求':'本地面板离线或未就绪'}</p>
       {snapshot && <p>北京时间 {new Date(snapshot.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}
         {Date.now() - Date.parse(snapshot.updatedAt) > 600_000 ? ' · 快照待更新' : ''}</p>}
     </div><button type="button" disabled={busy} onClick={() => void load()}>{busy ? '读取中…' : '刷新快照'}</button></div>
