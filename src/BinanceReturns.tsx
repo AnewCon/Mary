@@ -32,10 +32,10 @@ export function BinanceReturns({ledger, view, waiting}: {ledger?: BinanceLedger;
     : ledger && ledger.dayStart !== todayStart ? '等待同步今天的收益' : waiting;
   return <>
     {view !== 'positions' && <TodayReturns value={today} detail={detail} updated={ledger?.asOf}/>}
-    {view !== 'earnings' && <FoldPanel title="历史仓位 · 平仓记录" defaultOpen>
+    {view !== 'earnings' && <FoldPanel title="历史仓位 · 平仓记录">
       <BillList rows={ledger?.closed} waiting={waiting} closed/>
     </FoldPanel>}
-    {view !== 'positions' && <FoldPanel title="历史收益账单" defaultOpen>
+    {view !== 'positions' && <FoldPanel title="历史收益账单">
       {ledger && <div className="exchange-body binance-bill-summary">
         <span>近 7 个自然日净收益</span><b className={color(ledger.period.net)}>{ledger.complete ? format(ledger.period.net) : '—'} USDT</b>
       </div>}
