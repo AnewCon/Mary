@@ -90,9 +90,6 @@ export function BinanceWorkspace({ api, live = false }: { api: Api; live?: boole
   if (live) return <BinanceLiveDashboard api={api}/>;
 
   return <div className="exchange-workspace">
-    <FoldPanel title="虚拟订单账本"><BinancePaperLedger api={api}/></FoldPanel>
-    <FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel>
-    <FoldPanel title="账户设置"><BinanceAccountSettings api={api}/></FoldPanel>
     <section className="panel exchange-panel">
       <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安 USDⓈ-M 模拟盘 · API 接入</h2>
         <p>交易所模拟账户。接入后独立展示余额、仓位和未实现盈亏。</p></div>
@@ -100,5 +97,8 @@ export function BinanceWorkspace({ api, live = false }: { api: Api; live?: boole
       {enabled === false && <div className="exchange-body"><p>预留给未来的 VPS。需部署币安模拟盘后端，并在服务端配置模拟盘凭证。</p></div>}
     </section>
     {enabled && <BinanceDemoDashboard api={api}/>}
+    <FoldPanel title="虚拟订单账本"><BinancePaperLedger api={api}/></FoldPanel>
+    <FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel>
+    <FoldPanel title="账户设置"><BinanceAccountSettings api={api}/></FoldPanel>
   </div>;
 }

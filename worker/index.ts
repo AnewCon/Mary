@@ -1,5 +1,5 @@
 import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest, submitLocalLiveAction, readLocalLiveAccount } from './binance-live-local';
-import { publishDemoSnapshot, enqueueDemo, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
+import { publishDemoSnapshot, enqueueDemo, enqueueDemoRefresh, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
 import { readBinanceDemo, type BinanceDemoEnv } from './binance-demo';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
 import { paperOrders, writePaperOrder } from './paper-orders';
@@ -78,7 +78,7 @@ if(p.startsWith('/api/binance-demo/')){
   if(!enabled)throw new Failure('BINANCE_DEMO_DISABLED',404);
   const binance={...e,BINANCE_DEMO_TRADING_ENABLED:tradingEnabled?'true':'false'};
   if(p.endsWith('/account')&&m==='GET')return json(await readBinanceDemo(binance));
-  if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await readBinanceDemo(binance))}
+  if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await enqueueDemoRefresh(e.DB))}
   if(query){const input=await body(r);if(!['orders','contract','query'].includes(input?.kind))throw new Failure('INVALID_DEMO_QUERY');await limit(e,'binance-demo-query',15);return json(await enqueueDemo(e.DB,input))}
   if(p.endsWith('/action')&&m==='GET')return json(await queuedDemoStatus(e.DB,u.searchParams.get('id')));
   if(tradingEnabled&&write){await limit(e,'binance-demo-action',8);return json(await enqueueDemo(e.DB,await body(r)))}

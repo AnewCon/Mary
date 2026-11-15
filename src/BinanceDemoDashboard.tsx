@@ -70,8 +70,22 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
     setBusy(true);
     setRefreshError('');
     try {
-      const result: DemoAccount = await api('/binance-demo/account');
-      setData(current => (current?.snapshot?.updatedAt ?? '') > (result.snapshot?.updatedAt ?? '') && result.configured ? current : result);
+      const {id} = await api('/binance-demo/sync', {});
+      const deadline = Date.now() + 45_000;
+      let updated = false;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 3_000));
+        const request = await api('/binance-demo/action?id=' + encodeURIComponent(id));
+        if (request.state === 'acknowledged') {
+          const result: DemoAccount = await api('/binance-demo/account');
+          setData(current => (current?.snapshot?.updatedAt ?? '') > (result.snapshot?.updatedAt ?? '') && result.configured ? current : result);
+          updated = true;
+          break;
+        }
+        if (request.state === 'rejected') throw new Error('VPS 无法拉取模拟盘数据');
+        if (!['queued', 'running'].includes(request.state)) break;
+      }
+      if (!updated) throw new Error('等待 VPS 更新超时，请稍后查看同步时间。');
       setReadError('');
     } catch (err) {
       setRefreshError((err as Error).message);
@@ -86,12 +100,12 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
     <div className="panel">
       <div className="panelhead">
         <div>
-          <h2>币安 USDⓈ-M 模拟账户</h2>
+          <h2>币安 USDⓈ-M 模拟账户{data?.snapshot && <span className="count">{data.snapshot.positions.length} 个仓位</span>}</h2>
           <p>{updated ? `北京时间 ${updated} · ${data.stale ? '数据待更新' : 'VPS 已同步'}`
             : data?.configured === false ? '等待配置模拟盘密钥' : '等待首次同步'}</p>
         </div>
         <button className="primary" disabled={busy || !data?.configured} onClick={() => void refresh()}>
-          <RefreshCw size={15}/>{busy ? '同步中…' : '读取最新快照'}
+          <RefreshCw size={15}/>{busy ? '同步中…' : '立即同步'}
         </button>
       </div>
     </div>
@@ -119,7 +133,7 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
             {amount(position.unrealizedPnl)} {position.marginAsset}
           </td>
         </tr>)}</tbody>
-      </table></div> : <div className="empty">{snapshot ? '当前没有持仓' : '等待账户数据'}</div>}
+      </table></div> : <div className="empty">{snapshot ? (data?.stale ? '上次同步时没有持仓，请立即同步确认。' : '当前没有持仓') : '等待账户数据'}</div>}
     </div>}
     {view !== 'earnings' && <FoldPanel title="历史持仓收益">
       <div className="exchange-body">

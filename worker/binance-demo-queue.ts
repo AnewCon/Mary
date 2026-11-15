@@ -31,6 +31,13 @@ export async function enqueueDemo(db: D1Database, input: unknown) {
   return {id,state:row.state,result:row.result?JSON.parse(row.result):null};
 }
 
+export async function enqueueDemoRefresh(db: D1Database) {
+  const id = crypto.randomUUID().replaceAll('-', '');
+  await db.prepare("INSERT INTO binance_demo_actions(id,payload,state,created_at) VALUES(?,?,'queued',?)")
+    .bind(id, JSON.stringify({kind:'refresh_snapshot'}), now()).run();
+  return {id};
+}
+
 export async function queuedDemoStatus(db:D1Database,id:unknown) {
   if(typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id)) throw new Failure('INVALID_REQUEST_ID');
   const row=await db.prepare('SELECT state,result,created_at FROM binance_demo_actions WHERE id=?').bind(id)
@@ -45,7 +52,8 @@ export async function queuedDemoStatus(db:D1Database,id:unknown) {
 export async function claimDemo(db:D1Database, tradingEnabled: boolean) {
   const cutoff=new Date(Date.now()-120000).toISOString();
   const row=await db.prepare(`UPDATE binance_demo_actions SET state='running'
-    WHERE id=(SELECT id FROM binance_demo_actions WHERE state='queued' AND created_at>=? AND (?=1 OR json_extract(payload,'$.kind') IN ('orders','contract','query')) ORDER BY created_at,id LIMIT 1)
+    WHERE id=(SELECT id FROM binance_demo_actions WHERE state='queued' AND created_at>=? AND (?=1 OR json_extract(payload,'$.kind') IN ('orders','contract','query','refresh_snapshot'))
+      ORDER BY CASE WHEN json_extract(payload,'$.kind')='refresh_snapshot' THEN 1 ELSE 0 END,created_at,id LIMIT 1)
     RETURNING id,payload`).bind(cutoff,tradingEnabled?1:0).first<{id:string;payload:string}>();
   return row?{id:row.id,action:JSON.parse(row.payload)}:null;
 }

@@ -277,11 +277,27 @@ def main():
                 job=cloud('claim',{})
                 if job:
                     kind=job['action']['kind']
-                    if kind in {'open','limit','bracket'}:
-                        marker.touch()
-                        due=0
-                    if kind in {'close','cancel'}: due=history_due=0
-                    process(job)
+                    if kind=='refresh_snapshot':
+                        report={'id':job['id']}
+                        try:
+                            active=snapshot(True)
+                            if mode=='on_open' and active: marker.touch()
+                            bootstrap=False
+                            due=time.monotonic()+60
+                            history_due=time.monotonic()+300
+                            report.update(state='acknowledged',result={'refreshed':True})
+                            print('manual snapshot uploaded',flush=True)
+                        except Exception as error:
+                            code=str(getattr(error,'code',type(error).__name__))
+                            report.update(state='rejected',result={'code':code})
+                            print('manual snapshot failed',code,flush=True)
+                        atomic_json(spool,report)
+                    else:
+                        if kind in {'open','limit','bracket'}:
+                            marker.touch()
+                            due=0
+                        if kind in {'close','cancel'}: due=history_due=0
+                        process(job)
         except Exception as e:
             print('queue operation failed',getattr(e,'code',type(e).__name__),flush=True)
         if time.monotonic()>=bracket_due and not spool.exists():
