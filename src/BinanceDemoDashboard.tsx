@@ -1,3 +1,4 @@
+import FoldPanel from './FoldPanel';
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import BinanceDemoTradeForm from './BinanceDemoTradeForm';
@@ -120,16 +121,15 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
         </tr>)}</tbody>
       </table></div> : <div className="empty">{snapshot ? '当前没有持仓' : '等待账户数据'}</div>}
     </div>}
-    {view !== 'earnings' && <section className="panel">
-      <div className="panelhead"><h2>历史持仓收益</h2></div>
+    {view !== 'earnings' && <FoldPanel title="历史持仓收益">
       <div className="exchange-body">
         {snapshot?.history?.length ? <div className="phone-position-list">{snapshot.history.map(row=><article className="phone-position" key={row.asset+':'+row.tranId}>
           <div><strong>{row.symbol}</strong><strong className={Number(row.income)<0?'red':'green'}>{amount(row.income)} {row.asset}</strong></div>
           <small>{new Date(row.time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}（北京时间） · 已实现盈亏</small>
         </article>)}</div> : <p>{snapshot?.history?'暂无已实现盈亏记录':'等待 VPS 同步历史记录'}</p>}
       </div>
-    </section>}
-    {view === 'all' && data?.configured && data.tradingEnabled && <BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
-      onApplied={() => void refresh()} />}
+    </FoldPanel>}
+    {view === 'all' && data?.configured && data.tradingEnabled && <FoldPanel title="模拟盘交易"><BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
+      onApplied={() => void refresh()} /></FoldPanel>}
   </>;
 }

@@ -1,3 +1,4 @@
+import FoldPanel from './FoldPanel';
 import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { BinancePaperLedger, ExchangeMark } from './ExchangeAccounts';
@@ -28,7 +29,7 @@ export default function AccountPerformance({ api, ...performance }: Props) {
       </button>)}
     </div>
     <div id="account-ledger-panel">
-      {selected === 'okx' ? <Performance {...performance}/> : <><BinancePaperLedger api={api}/><PaperReviews api={api}/></>}
+      {selected === 'okx' ? <Performance {...performance}/> : <><BinancePaperLedger api={api}/><FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel></>}
     </div>
   </>;
 }

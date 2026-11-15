@@ -1,3 +1,5 @@
+import FoldPanel from './FoldPanel';
+import BinanceLiveDashboard from './BinanceLiveDashboard';
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, Layers } from 'lucide-react';
 import { ExchangeMark } from './ExchangeAccounts';
@@ -25,6 +27,7 @@ type Props = {
 };
 
 export default function MobileDashboard({ api, okxPositions, performance }: Props) {
+  const [binanceLive,setBinanceLive]=useState(false);
   const [panel, setPanel] = useState<'positions' | 'earnings'>('positions');
   const [exchange, setExchange] = useState<'okx' | 'binance'>('okx');
   return <section className="phone-dashboard">
@@ -34,10 +37,10 @@ export default function MobileDashboard({ api, okxPositions, performance }: Prop
     </nav>
     <div className="phone-exchanges" role="group" aria-label="选择账户">
       <button type="button" className="okx" aria-pressed={exchange === 'okx'} onClick={() => setExchange('okx')}><ExchangeMark exchange="okx"/>欧易模拟账户</button>
-      <button type="button" className="binance" aria-pressed={exchange === 'binance'} onClick={() => setExchange('binance')}><ExchangeMark exchange="binance"/>币安模拟账户</button>
+      <button type="button" className="binance" aria-pressed={exchange === 'binance'} onClick={() => setExchange('binance')}><ExchangeMark exchange="binance"/>币安账户</button>
     </div>
     {exchange === 'binance'
-      ? <BinanceDemoDashboard api={api} view={panel}/>
-      : panel === 'positions' ? <>{okxPositions}<details className="panel exchange-body"><summary>历史成交与持仓收益</summary><Performance {...performance}/></details></> : <Performance {...performance}/>}
+      ? <><button type="button" className="badge exchange-binance account-mode-button phone-mode-button" aria-pressed={binanceLive} onClick={()=>setBinanceLive(!binanceLive)}><ExchangeMark exchange="binance"/>币安 · {binanceLive?"真实":"模拟"} <span aria-hidden="true">⇄</span></button>{binanceLive?<BinanceLiveDashboard api={api} view={panel}/>:<BinanceDemoDashboard api={api} view={panel}/>}</>
+      : panel === 'positions' ? <>{okxPositions}<FoldPanel title="历史成交与持仓收益"><Performance {...performance}/></FoldPanel></> : <Performance {...performance}/>}
   </section>;
 }

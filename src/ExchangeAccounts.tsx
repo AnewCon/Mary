@@ -1,3 +1,5 @@
+import FoldPanel from './FoldPanel';
+import BinanceLiveDashboard from './BinanceLiveDashboard';
 import BinanceAccountSettings from './BinanceAccountSettings';
 import { useEffect, useState } from 'react';
 import BinanceDemoDashboard from './BinanceDemoDashboard';
@@ -75,7 +77,7 @@ export function BinancePaperLedger({ api, positionsOnly = false }: { api: Api; p
     </section>;
 }
 
-export function BinanceWorkspace({ api }: { api: Api }) {
+export function BinanceWorkspace({ api, live = false }: { api: Api; live?: boolean }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     let active = true;
@@ -85,10 +87,12 @@ export function BinanceWorkspace({ api }: { api: Api }) {
     return () => { active = false; };
   }, [api]);
 
+  if (live) return <BinanceLiveDashboard api={api}/>;
+
   return <div className="exchange-workspace">
-    <BinancePaperLedger api={api}/>
-    <PaperReviews api={api}/>
-    <BinanceAccountSettings api={api}/>
+    <FoldPanel title="虚拟订单账本"><BinancePaperLedger api={api}/></FoldPanel>
+    <FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel>
+    <FoldPanel title="账户设置"><BinanceAccountSettings api={api}/></FoldPanel>
     <section className="panel exchange-panel">
       <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安 USDⓈ-M 模拟盘 · API 接入</h2>
         <p>交易所模拟账户。接入后独立展示余额、仓位和未实现盈亏。</p></div>

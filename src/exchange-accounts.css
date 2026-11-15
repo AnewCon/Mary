@@ -83,3 +83,15 @@
   .phone-position dd { margin: 1px 0 0; font-weight: 600; overflow-wrap: anywhere; }
   .phone-position > button { width: 100%; margin-top: 10px; min-height: 44px; justify-content: center; }
 }
+
+.fold-panel > h2 { margin: 0; font-size: 15px; }
+.fold-panel > h2 > button { width: 100%; justify-content: space-between; min-height: 48px; padding: 12px 16px; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: #31594c; text-align: left; }
+.fold-label { color: #55776c; font-size: 12px; white-space: nowrap; }
+.fold-content:not([hidden]) { padding: 0 12px 12px; }
+.fold-content > .panel:last-child { margin-bottom: 0; }
+.account-mode-button { cursor: pointer; min-height: 34px; gap: 7px; }
+.account-mode-button[aria-pressed="true"] { background: #fff0cf; border-color: #997038; }
+.phone-mode-button { margin-bottom: 10px; min-height: 42px; }
+.exchange-panel .phone-position-list { display: grid; gap: 8px; }
+.exchange-panel .phone-position dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 8px 0; gap: 8px; }
+.exchange-panel .phone-position dd { margin: 0; overflow-wrap: anywhere; }
