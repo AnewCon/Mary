@@ -9,13 +9,14 @@ type Snapshot = {
 type Api = (path: string, body?: unknown) => Promise<unknown>;
 
 export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; view?: 'all' | 'positions' | 'earnings' }) {
+  const [agent,setAgent]=useState<boolean|null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState(false);
   const load = useCallback(async () => {
     setBusy(true);
     setError(false);
-    try { setSnapshot((await api('/binance-demo/live-account') as { snapshot: Snapshot | null }).snapshot); }
+    try { const data=await api('/binance-demo/live-account') as {snapshot:Snapshot|null;ready:boolean};setSnapshot(data.snapshot);setAgent(data.ready); }
     catch { setError(true); }
     finally { setBusy(false); }
   }, [api]);
@@ -25,7 +26,8 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
     return () => window.clearInterval(timer);
   }, [load]);
   return <section className="panel exchange-panel">
-    <div className="panelhead"><div><h2>币安真实账户 · 只读</h2>
+    <div className="panelhead"><div><h2>币安真实账户</h2>
+      <p>{agent===null?'检查本地面板':agent?'本地面板在线 · 可接收待确认请求':'本地面板离线或未就绪'}</p>
       {snapshot && <p>北京时间 {new Date(snapshot.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}
         {Date.now() - Date.parse(snapshot.updatedAt) > 600_000 ? ' · 快照待更新' : ''}</p>}
     </div><button type="button" disabled={busy} onClick={() => void load()}>{busy ? '读取中…' : '刷新快照'}</button></div>

@@ -1,3 +1,4 @@
+import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest } from './binance-live-local';
 import { publishDemoSnapshot, enqueueDemo, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
 import { readBinanceDemo, type BinanceDemoEnv } from './binance-demo';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
@@ -8,7 +9,7 @@ import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
 import {performance,history,syncPerformance,resetTodayEarnings} from './performance';
-interface Env extends BinanceDemoEnv {DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
+interface Env extends BinanceDemoEnv {BINANCE_LIVE_DESKTOP_TOKEN?:string;DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
 async function body(r:Request){const text=await r.text();if(new TextEncoder().encode(text).length>16384)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
@@ -22,11 +23,28 @@ if(p==='/api/paper/reviews'&&m==='GET'){await auth(r,e,'read');return json(await
 if(p==='/api/paper/reviews'&&m==='POST'){const principal=await auth(r,e,'write');await limit(e,'paper-reviews:'+principal,10);return json(await savePaperReview(e.DB,await body(r)))}
 if(p==='/api/paper/orders'&&m==='GET'){await auth(r,e,'read');return json(await paperOrders(e.DB))}
 if(p==='/api/paper/orders'&&m==='POST'){const principal=await auth(r,e,'write');await limit(e,'paper:'+principal,20);return json(await writePaperOrder(e.DB,await body(r)))}
+if(p.startsWith('/api/binance-live/')){
+  const operation=p.split('/').at(-1)!;
+  if(p.startsWith('/api/binance-live/agent/')&&m==='POST'){
+    const authorization=r.headers.get('Authorization')||'';
+    if(operation==='snapshot'){
+      if(!e.BINANCE_LIVE_DESKTOP_TOKEN||await hash(authorization)!==await hash('Bearer '+e.BINANCE_LIVE_DESKTOP_TOKEN))throw new Failure('UNAUTHORIZED',401);
+      return json(await publishDemoSnapshot(e,await body(r),true));
+    }
+    return json(await localLiveAgent(e.DB,e.BINANCE_LIVE_DESKTOP_TOKEN,authorization,operation,await body(r)));
+  }
+  await auth(r,e,operation==='status'?'read':'live_trade');
+  if(operation==='status'&&m==='GET')return json(await localLiveStatus(e.DB));
+  if(operation==='capabilities'&&m==='GET')return json({enabled:Boolean(e.BINANCE_LIVE_DESKTOP_TOKEN)});
+  if(operation==='request'&&m==='POST'){await limit(e,'live-desktop-order',5);return json(await submitLocalLive(e.DB,await body(r)))}
+  if(operation==='request'&&m==='GET')return json(await readLocalLiveRequest(e.DB,u.searchParams.get('id')));
+  throw new Failure('NOT_FOUND',404);
+}
 if(p.startsWith('/api/binance-demo/')){
   if(p==='/api/binance-demo/live-account'&&m==='GET'){
     await auth(r,e,'read',true);
     const raw=await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_live_snapshot'").first<string>('value');
-    return json({snapshot:raw?JSON.parse(raw):null});
+    return json({snapshot:raw?JSON.parse(raw):null,...await localLiveStatus(e.DB)});
   }
   if(p==='/api/binance-demo/sync-mode'){
     await auth(r,e,'read',true);
@@ -41,7 +59,6 @@ if(p.startsWith('/api/binance-demo/')){
     const secret=e.BINANCE_DEMO_RELAY_TOKEN;
     if(!secret||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
     if(p.endsWith('/sync-mode'))return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open'});
-    if(p.endsWith('/live-snapshot'))return json(await publishDemoSnapshot(e,await body(r),true));
     if(p.endsWith('/snapshot'))return json(await publishDemoSnapshot(e,await body(r)));
     if(p.endsWith('/claim'))return json(await claimDemo(e.DB,e.MCP_DEMO_TRADING_ENABLED==='true'));
     if(p.endsWith('/result'))return json(await reportDemo(e.DB,await body(r)));
@@ -90,8 +107,8 @@ if(p==='/api/demo/protect_tiers'&&m==='POST'){await limit(e,'demo:'+principal,20
 if(p==='/api/demo/close'&&m==='POST'){await limit(e,'demo:'+principal,20);return json(await mcpClose(e,await body(r),sync))}
 if(/^\/api\/demo\/(leverage|place|protect|amend_protection|cancel_protection|cancel_order)$/.test(p)&&m==='POST'){await limit(e,'demo:'+principal,20);return json(await demoExecute(e,p.split('/')[3],await body(r),principal,sync))}
 if(p==='/api/keys'&&m==='GET')return json((await e.DB.prepare('SELECT id,name,mask,scopes,created_at,last_used_at,revoked FROM api_keys ORDER BY created_at DESC').all()).results);
-if(p==='/api/keys'&&m==='POST'){const b=await body(r);if(typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.some((s:string)=>!['read','write','demo_trade'].includes(s)))throw new Failure('INVALID_KEY_INPUT');const key=randomKey(),id=crypto.randomUUID();await e.DB.prepare('INSERT INTO api_keys(id,name,hash,mask,scopes,created_at) VALUES(?,?,?,?,?,?)').bind(id,b.name,await hash(key),key.slice(0,8)+'…'+key.slice(-4),JSON.stringify(b.scopes),now()).run();return json({id,key})}
-if(/^\/api\/keys\/[^/]+\/scopes$/.test(p)&&m==='POST'){const b=await body(r);if(!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>3||b.scopes.some((s:string)=>!['read','write','demo_trade'].includes(s)))throw new Failure('INVALID_SCOPES');await e.DB.prepare('UPDATE api_keys SET scopes=? WHERE id=? AND revoked=0').bind(JSON.stringify([...new Set(b.scopes)]),p.split('/')[3]).run();return json({updated:true})}
+if(p==='/api/keys'&&m==='POST'){const b=await body(r);if(typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.some((s:string)=>!['read','write','demo_trade','live_trade'].includes(s)))throw new Failure('INVALID_KEY_INPUT');const key=randomKey(),id=crypto.randomUUID();await e.DB.prepare('INSERT INTO api_keys(id,name,hash,mask,scopes,created_at) VALUES(?,?,?,?,?,?)').bind(id,b.name,await hash(key),key.slice(0,8)+'…'+key.slice(-4),JSON.stringify(b.scopes),now()).run();return json({id,key})}
+if(/^\/api\/keys\/[^/]+\/scopes$/.test(p)&&m==='POST'){const b=await body(r);if(!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>4||b.scopes.some((s:string)=>!['read','write','demo_trade','live_trade'].includes(s)))throw new Failure('INVALID_SCOPES');await e.DB.prepare('UPDATE api_keys SET scopes=? WHERE id=? AND revoked=0').bind(JSON.stringify([...new Set(b.scopes)]),p.split('/')[3]).run();return json({updated:true})}
 if(/^\/api\/keys\/[^/]+\/revoke$/.test(p)&&m==='POST'){await e.DB.prepare('UPDATE api_keys SET revoked=1 WHERE id=?').bind(p.split('/')[3]).run();return json({revoked:true})}
 if(['/api/ai/decisions','/api/ai/logs'].includes(p)){const table=p.endsWith('decisions')?'ai_decisions':'ai_logs';if(m==='GET')return json((await e.DB.prepare(`SELECT * FROM ${table} WHERE id NOT LIKE 'binance-review:%' ORDER BY created_at DESC LIMIT 100`).all()).results);const b=await body(r);if(typeof b.content!=='string'||!b.content.trim()||b.content.length>8000||['symbol','direction','recommendation','source'].some(k=>b[k]!==undefined&&(typeof b[k]!=='string'||b[k].length>200)))throw new Failure('INVALID_RECORD');const id=crypto.randomUUID();await e.DB.prepare(`INSERT INTO ${table} VALUES(?,?,?)`).bind(id,now(),JSON.stringify(b)).run();return json({id})}
 if(p==='/api/ai/plans'&&m==='GET')return json(await listPlans(e.DB));
