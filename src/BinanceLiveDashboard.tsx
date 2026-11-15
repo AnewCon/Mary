@@ -33,7 +33,7 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
     </div><button type="button" disabled={busy} onClick={() => void load()}>{busy ? '读取中…' : '刷新快照'}</button></div>
     <div className="exchange-body">
       {error && <p role="alert">暂时无法读取真实账户，请重试。</p>}
-      {!snapshot && !busy && !error && <p>尚未收到真实账户数据，请先在 VPS 配置只读凭证（/etc/quantos-binance/live-readonly.json）。</p>}
+      {!snapshot && !busy && !error && <p>尚未收到真实账户数据，请在 Windows 打开 QuantOS 本地面板并验证真实账户 API。</p>}
       {snapshot && view !== 'positions' && <div className="metrics">{([
         ['钱包余额', snapshot.account?.walletBalance], ['可用余额', snapshot.account?.availableBalance],
         ['保证金余额', snapshot.account?.marginBalance], ['未实现盈亏', snapshot.account?.unrealizedPnl],
