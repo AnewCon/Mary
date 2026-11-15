@@ -23,10 +23,25 @@ if(p==='/api/paper/reviews'&&m==='POST'){const principal=await auth(r,e,'write')
 if(p==='/api/paper/orders'&&m==='GET'){await auth(r,e,'read');return json(await paperOrders(e.DB))}
 if(p==='/api/paper/orders'&&m==='POST'){const principal=await auth(r,e,'write');await limit(e,'paper:'+principal,20);return json(await writePaperOrder(e.DB,await body(r)))}
 if(p.startsWith('/api/binance-demo/')){
+  if(p==='/api/binance-demo/live-account'&&m==='GET'){
+    await auth(r,e,'read',true);
+    const raw=await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_live_snapshot'").first<string>('value');
+    return json({snapshot:raw?JSON.parse(raw):null});
+  }
+  if(p==='/api/binance-demo/sync-mode'){
+    await auth(r,e,'read',true);
+    if(m==='GET')return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open'});
+    const {mode}=await body(r)??{};
+    if(!['always','on_open','paused'].includes(mode))throw new Failure('INVALID_SYNC_MODE');
+    await e.DB.prepare("INSERT OR REPLACE INTO system_settings VALUES('binance_demo_sync_mode',?)").bind(mode).run();
+    return json({mode});
+  }
   const write=m==='POST'&&p.endsWith('/action');
   if(p.startsWith('/api/binance-demo/agent/')&&m==='POST'){
     const secret=e.BINANCE_DEMO_RELAY_TOKEN;
     if(!secret||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
+    if(p.endsWith('/sync-mode'))return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open'});
+    if(p.endsWith('/live-snapshot'))return json(await publishDemoSnapshot(e,await body(r),true));
     if(p.endsWith('/snapshot'))return json(await publishDemoSnapshot(e,await body(r)));
     if(p.endsWith('/claim'))return json(await claimDemo(e.DB,e.MCP_DEMO_TRADING_ENABLED==='true'));
     if(p.endsWith('/result'))return json(await reportDemo(e.DB,await body(r)));
@@ -88,4 +103,4 @@ if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
 export default {async fetch(r:Request,e:Env){try{return await route(r,e)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){
-ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1440)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};
+ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}if(new Date(_c.scheduledTime).getUTCMinutes()===0)await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id < (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1 OFFSET 1439)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};

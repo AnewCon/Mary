@@ -8,6 +8,7 @@ interface DemoAccount {
   stale: boolean;
   snapshot: {
     updatedAt: string;
+    history?: {symbol:string;income:string;asset:string;time:number;tranId:string|number}[];
     account: {
       walletBalance: string;
       availableBalance: string;
@@ -85,7 +86,7 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
       <div className="panelhead">
         <div>
           <h2>币安 USDⓈ-M 模拟账户</h2>
-          <p>{updated ? `北京时间 ${updated} · ${data.stale ? '数据待更新' : 'VPS 每 60 秒上传'}`
+          <p>{updated ? `北京时间 ${updated} · ${data.stale ? '数据待更新' : 'VPS 已同步'}`
             : data?.configured === false ? '等待配置模拟盘密钥' : '等待首次同步'}</p>
         </div>
         <button className="primary" disabled={busy || !data?.configured} onClick={() => void refresh()}>
@@ -119,6 +120,15 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
         </tr>)}</tbody>
       </table></div> : <div className="empty">{snapshot ? '当前没有持仓' : '等待账户数据'}</div>}
     </div>}
+    {view !== 'earnings' && <section className="panel">
+      <div className="panelhead"><h2>历史持仓收益</h2></div>
+      <div className="exchange-body">
+        {snapshot?.history?.length ? <div className="phone-position-list">{snapshot.history.map(row=><article className="phone-position" key={row.asset+':'+row.tranId}>
+          <div><strong>{row.symbol}</strong><strong className={Number(row.income)<0?'red':'green'}>{amount(row.income)} {row.asset}</strong></div>
+          <small>{new Date(row.time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}（北京时间） · 已实现盈亏</small>
+        </article>)}</div> : <p>{snapshot?.history?'暂无已实现盈亏记录':'等待 VPS 同步历史记录'}</p>}
+      </div>
+    </section>}
     {view === 'all' && data?.configured && data.tradingEnabled && <BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
       onApplied={() => void refresh()} />}
   </>;

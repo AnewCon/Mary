@@ -1,3 +1,4 @@
+import BinanceAccountSettings from './BinanceAccountSettings';
 import { useEffect, useState } from 'react';
 import BinanceDemoDashboard from './BinanceDemoDashboard';
 import PaperReviews from './PaperReviews';
@@ -87,6 +88,7 @@ export function BinanceWorkspace({ api }: { api: Api }) {
   return <div className="exchange-workspace">
     <BinancePaperLedger api={api}/>
     <PaperReviews api={api}/>
+    <BinanceAccountSettings api={api}/>
     <section className="panel exchange-panel">
       <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安 USDⓈ-M 模拟盘 · API 接入</h2>
         <p>交易所模拟账户。接入后独立展示余额、仓位和未实现盈亏。</p></div>

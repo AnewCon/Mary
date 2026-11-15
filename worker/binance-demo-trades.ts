@@ -9,6 +9,7 @@ type DemoAction =
   | { kind: 'leverage'; symbol: string; leverage: number }
   | {kind:'orders'|'contract';symbol:string}
   | {kind:'query';symbol:string;exchangeOrderId:string}
+  | {kind:'bracket';symbol:string;side:OrderSide;quantity:string;price:string;takeProfit:string;stopLoss:string}
   | {kind:'limit';symbol:string;side:OrderSide;quantity:string;price:string}
   | {kind:'protect';symbol:string;side:OrderSide;triggerPrice:string;protection:'STOP_MARKET'|'TAKE_PROFIT_MARKET'}
   | {kind:'cancel';symbol:string;exchangeOrderId:string;conditional:boolean};
@@ -21,7 +22,7 @@ function requestId(value: unknown): string {
 
 export function decode(input: unknown): { id: string; action: DemoAction } {
   if (!input || typeof input !== 'object') throw new Failure('INVALID_DEMO_ACTION');
-  const { kind, id, symbol, side, quantity, leverage, percent, confirm, price, triggerPrice, protection, exchangeOrderId, conditional } = input as Record<string, unknown>;
+  const { kind, id, symbol, side, quantity, leverage, percent, confirm, price, triggerPrice, protection, exchangeOrderId, conditional, takeProfit, stopLoss } = input as Record<string, unknown>;
   if (!['orders','contract','query'].includes(String(kind)) && confirm !== true) throw new Failure('BINANCE_DEMO_CONFIRMATION_REQUIRED');
   if (typeof symbol !== 'string' || !/^[A-Z0-9]{2,24}USDT$/.test(symbol)) throw new Failure('INVALID_SYMBOL');
   const request = requestId(id);
@@ -31,6 +32,11 @@ export function decode(input: unknown): { id: string; action: DemoAction } {
     return {id:request,action:kind==='query'?{kind,symbol,exchangeOrderId}:{kind,symbol,exchangeOrderId,conditional:conditional===true}};
   }
   if(side==='LONG'||side==='SHORT'){
+    if(kind==='bracket'){
+      const entry=positive(price),tp=positive(takeProfit),sl=positive(stopLoss);
+      if(side==='LONG'?!(sl<entry&&entry<tp):!(tp<entry&&entry<sl))throw new Failure('INVALID_BRACKET_PRICES');
+      return {id:request,action:{kind,symbol,side,quantity:text(positive(quantity)),price:text(entry),takeProfit:text(tp),stopLoss:text(sl)}};
+    }
     if(kind==='limit')return {id:request,action:{kind,symbol,side,quantity:text(positive(quantity)),price:text(positive(price))}};
     if(kind==='protect'&&(protection==='STOP_MARKET'||protection==='TAKE_PROFIT_MARKET'))
       return {id:request,action:{kind,symbol,side,protection,triggerPrice:text(positive(triggerPrice))}};

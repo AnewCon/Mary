@@ -2,14 +2,19 @@ import { Failure } from './exchange';
 import { fetchDemoSnapshot, type BinanceDemoEnv } from './binance-demo';
 import { decode } from './binance-demo-trades';
 
-const cacheKey = 'binance_demo_snapshot';
 const now = () => new Date().toISOString();
 
-export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any) {
+export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live = false) {
+  const cacheKey = live ? 'binance_live_snapshot' : 'binance_demo_snapshot';
   if (!input || !Array.isArray(input.positions) || input.positions.length > 500 || !Array.isArray(input.account?.assets))
     throw new Failure('INVALID_BINANCE_SNAPSHOT');
   const snapshot = await fetchDemoSnapshot(env, async (_method, path) =>
     path === '/fapi/v3/account' ? input.account : input.positions);
+  const history=Array.isArray(input.history)?input.history.slice(0,20).filter((x:any)=>x && typeof x.symbol==='string' && typeof x.income==='string' && Number.isSafeInteger(x.time)) : undefined;
+  if(history===undefined){
+    const old=await env.DB.prepare('SELECT value FROM system_settings WHERE key=?').bind(cacheKey).first<string>('value');
+    if(old) Object.assign(snapshot,{history:JSON.parse(old).history});
+  } else Object.assign(snapshot,{history});
   await env.DB.prepare('INSERT OR REPLACE INTO system_settings(key,value) VALUES(?,?)')
     .bind(cacheKey,JSON.stringify(snapshot)).run();
   return {updatedAt:snapshot.updatedAt};
@@ -50,7 +55,7 @@ export async function reportDemo(db:D1Database,input:any) {
     !['acknowledged','rejected','unknown'].includes(input.state)||!input.result||
     typeof input.result!=='object'||Array.isArray(input.result)) throw new Failure('INVALID_BINANCE_RESULT');
   const result=JSON.stringify(input.result);
-  const changed=await db.prepare("UPDATE binance_demo_actions SET state=?,result=? WHERE id=? AND state='running'")
+  const changed=await db.prepare("UPDATE binance_demo_actions SET state=?,result=? WHERE id=? AND (state='running' OR state='acknowledged' AND json_extract(payload,'$.kind')='bracket' AND json_extract(result,'$.protectionState') IN ('waiting_fill','armed','watching','protection_error'))")
     .bind(input.state,result,input.id).run();
   if(changed.meta.changes!==1){
     const old=await db.prepare('SELECT state,result FROM binance_demo_actions WHERE id=?').bind(input.id)

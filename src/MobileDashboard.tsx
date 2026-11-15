@@ -38,6 +38,6 @@ export default function MobileDashboard({ api, okxPositions, performance }: Prop
     </div>
     {exchange === 'binance'
       ? <BinanceDemoDashboard api={api} view={panel}/>
-      : panel === 'positions' ? okxPositions : <Performance {...performance}/>}
+      : panel === 'positions' ? <>{okxPositions}<details className="panel exchange-body"><summary>历史成交与持仓收益</summary><Performance {...performance}/></details></> : <Performance {...performance}/>}
   </section>;
 }

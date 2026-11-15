@@ -23,5 +23,6 @@ export const binanceDemoTools=[
  define('binance_demo_get_contract','查询合约规格、当前杠杆、保证金模式及持仓模式。用原编号读取查询结果。',{id,symbol},['id','symbol'],'contract',true),
  define('binance_demo_query_order','按交易所订单号查询成交状态。用原编号读取查询结果。',{id,symbol,exchangeOrderId},['id','symbol','exchangeOrderId'],'query',true),
  define('binance_demo_set_protection','确认后为现有模拟仓位设置整仓止盈或止损。标记价触发。两种保护分别提交、分别查询，彼此独立。',{id,symbol,side,confirm,triggerPrice:decimal,protection:{type:'string',enum:['STOP_MARKET','TAKE_PROFIT_MARKET']}},['id','symbol','side','confirm','triggerPrice','protection'],'protect'),
+ define('binance_demo_place_bracket','币安模拟盘限价入场。确认后挂单，VPS 发现任意成交时尝试安装整仓止盈止损；保护并非原子提交。用原编号持续检查保护状态。仅用于该方向无已有仓位的合约。',{...open,price:decimal,takeProfit:decimal,stopLoss:decimal},[...Object.keys(open),'price','takeProfit','stopLoss'],'bracket'),
  define('binance_demo_cancel_order','确认后撤销指定模拟委托。保护单传 algoId 并设 conditional=true。',{id,symbol,confirm,exchangeOrderId,conditional:{type:'boolean'}},['id','symbol','confirm','exchangeOrderId'],'cancel'),
 ];
