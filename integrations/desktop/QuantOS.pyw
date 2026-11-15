@@ -126,7 +126,7 @@ class Panel:
             widget=ttk.Entry(frame,show="*" if i<4 else "")
             widget.grid(row=i,column=1,columnspan=2,sticky="ew",pady=5)
             self.fields[label]=widget
-        ttk.Label(frame,text="直连此栏留空。仅按你选择的网络发送 请求。".replace("发送 请求","发送请求")).grid(row=5,columnspan=3,sticky="w",pady=(0,8))
+        ttk.Label(frame,text="直连请留空。修改输入框后，下次连接才会应用。").grid(row=5,columnspan=3,sticky="w",pady=(0,8))
         options=ttk.Frame(frame)
         options.grid(row=6,columnspan=3,sticky="ew",pady=(0,8))
         self.remember=tk.BooleanVar(value=False)
@@ -145,9 +145,14 @@ class Panel:
             highlightthickness=2,highlightbackground="#101c27",highlightcolor="#d7fff4")
         self.set_connection("idle")
         self.connect.grid(row=8,column=0,sticky="w")
+        self.disconnect_button=ttk.Button(frame,text="断开连接",command=self.disconnect)
+        self.disconnect_button.grid(row=8,column=1,sticky="w",padx=(10,0))
+        self.disconnect_button.grid_remove()
         ttk.Label(frame,text="连接后自动执行 Chat 已确认的请求。关闭面板停止接收新请求。").grid(row=10,columnspan=3,sticky="w",pady=10)
         self.events=queue.Queue()
         self.stop=threading.Event()
+        self.worker_active=False
+        self.closing=False
         root.protocol("WM_DELETE_WINDOW",self.close)
         root.after(180,self.render)
 
@@ -200,6 +205,8 @@ class Panel:
         self.status.set("Windows Hello 验证通过，已填入历史密钥。")
 
     def start(self):
+        if self.worker_active or self.hello is not None:
+            return
         key,secret,proxy=[w.get().strip() for w in self.fields.values()]
         if not key or not secret:
             messagebox.showinfo("配置", "请在此输入真实账户 API Key 与 Secret Key。")
@@ -218,21 +225,28 @@ class Panel:
             self.set_connection("failed")
             messagebox.showerror("未配对", "缺少 QuantOS 本机配对文件。")
             return
-        for w in self.fields.values():
-            w.delete(0,"end")
-            w.configure(state="disabled")
+        connection=Connection(token,key,secret,proxy)
+        self.stop.clear()
+        self.worker_active=True
+        for field in list(self.fields.values())[:2]:
+            field.delete(0,"end")
+        self.disconnect_button.configure(state="normal")
+        self.disconnect_button.grid()
         remember=self.remember.get()
         self.history.configure(state="disabled")
         self.remember_box.configure(state="disabled")
         self.set_connection("connecting")
         self.status.set("正在验证 API 权限及网络…")
-        threading.Thread(target=self.run,args=(Connection(token,key,secret,proxy),bool(proxy),(key,secret) if remember else None),daemon=True).start()
+        threading.Thread(target=self.run,args=(connection,bool(proxy),(key,secret) if remember else None),daemon=True).start()
 
     def run(self,c,proxied,remember=None):
         opened=False
+        offline_confirmed=False
         try:
             with c.opener.open(urllib.request.Request("https://www.cloudflare.com/cdn-cgi/trace",headers={"User-Agent":"QuantOS-Desktop/1.0"}),timeout=9) as r:
                 ip=str(ipaddress.IPv4Address(next(l[3:] for l in r.read().decode().splitlines() if l.startswith("ip="))))
+            if self.stop.is_set():
+                return
             c.snapshot()
             opened=True
 
@@ -263,6 +277,8 @@ class Panel:
                         self.events.put(("order",f'执行中 · {claimed["order"]["symbol"]} · {claimed["id"]}'))
                         self.submit_claimed(c,claimed)
                         until=0
+                if self.stop.is_set():
+                    break
                 if time.monotonic()>=until:
                     c.snapshot()
                     until=time.monotonic()+60
@@ -271,9 +287,12 @@ class Panel:
             self.events.put(("status","连接失败 · "+error_code(e)))
         finally:
             if opened:
-                try: c.cloud("heartbeat",{"ready":False})
-                except Exception: pass
-            self.events.put(("reset",None))
+                try:
+                    c.cloud("heartbeat",{"ready":False})
+                    offline_confirmed=True
+                except Exception:
+                    pass
+            self.events.put(("reset",(self.stop.is_set(),opened,offline_confirmed)))
 
     def submit_claimed(self,c,job):
         if self.stop.is_set():
@@ -296,21 +315,42 @@ class Panel:
     def render(self):
         while not self.events.empty():
             kind,data=self.events.get()
-            if kind=="connection": self.set_connection(data)
-            if kind=="status": self.status.set(data)
+            if kind=="connection" and not self.stop.is_set(): self.set_connection(data)
+            if kind=="status" and not self.stop.is_set(): self.status.set(data)
             if kind=="order": self.summary.set(data)
             if kind=="reset":
+                stopped,opened,notified=data
+                self.worker_active=False
+                self.disconnect_button.grid_remove()
+                if self.closing:
+                    self.root.destroy()
+                    return
                 for field in self.fields.values(): field.configure(state="normal")
                 self.history.configure(state="normal" if HISTORY_FILE.is_file() else "disabled")
                 self.remember_box.configure(state="normal")
-                self.set_connection("failed")
+                self.set_connection("idle" if stopped else "failed")
+                if stopped:
+                    self.status.set("已断开 · 已通知 QuantOS" if notified else
+                        "已断开 · 网站将按心跳超时更新状态" if opened else "已取消连接")
+                if not stopped and opened and not notified:
+                    self.status.set(self.status.get()+" · 网站将按心跳超时更新状态")
         self.root.after(180,self.render)
+
+    def disconnect(self):
+        if not self.worker_active:
+            return
+        self.stop.set()
+        self.disconnect_button.configure(state="disabled")
+        self.status.set("正在断开并通知 QuantOS…")
 
     def close(self):
         if self.hello:
             self.hello.close(cancel=True)
             self.hello=None
-        self.stop.set()
+        if self.worker_active:
+            self.closing=True
+            self.disconnect()
+            return
         self.root.destroy()
 
 if __name__=="__main__":

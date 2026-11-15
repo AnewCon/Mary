@@ -13,13 +13,14 @@ async function value<T>(db:D1Database,key:string):Promise<T|null>{
 }
 export async function localLiveStatus(db:D1Database){
   const beat=await value<{time:number;ready:boolean}>(db,heartbeatKey);
-  const online=Boolean(beat&&Date.now()-beat.time<35000);
+  const online=Boolean(beat?.ready===true&&Date.now()-beat.time<35000);
   return {online,ready:online&&beat?.ready===true,lastSeen:beat?.time??null};
 }
 export async function localLiveAgent(db:D1Database,secret:string|undefined,authorization:string,path:string,input:any){
   if(!secret||await hash(authorization)!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
   if(path==='heartbeat'){
     await db.prepare('INSERT OR REPLACE INTO system_settings(key,value) VALUES(?,?)').bind(heartbeatKey,JSON.stringify({time:Date.now(),ready:input?.ready===true})).run();
+    if(input?.ready!==true)return null;
     const queue=await value<Queue>(db,requestKey);
     return queue?.state==='pending'&&queue.expires>Date.now()?queue:null;
   }

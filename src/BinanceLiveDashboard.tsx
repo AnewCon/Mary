@@ -23,8 +23,17 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 60_000);
-    return () => window.clearInterval(timer);
-  }, [load]);
+    let active = true;
+    const presence = window.setInterval(async () => {
+      try {
+        const status = await api('/binance-live/status') as { ready: boolean };
+        if (active) setAgent(status.ready);
+      } catch {
+        if (active) setAgent(null);
+      }
+    }, 10_000);
+    return () => { active = false; window.clearInterval(timer); window.clearInterval(presence); };
+  }, [api, load]);
   return <section className="panel exchange-panel">
     <div className="panelhead"><div><h2>币安真实账户</h2>
       <p>{agent===null?'检查本地面板':agent?'本地面板在线 · 自动执行已确认请求':'本地面板离线或未就绪'}</p>
