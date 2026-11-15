@@ -1,4 +1,4 @@
-import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest } from './binance-live-local';
+import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest, submitLocalLiveAction, readLocalLiveAccount } from './binance-live-local';
 import { publishDemoSnapshot, enqueueDemo, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
 import { readBinanceDemo, type BinanceDemoEnv } from './binance-demo';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
@@ -37,6 +37,8 @@ if(p.startsWith('/api/binance-live/')){
   if(operation==='status'&&m==='GET')return json(await localLiveStatus(e.DB));
   if(operation==='capabilities'&&m==='GET')return json({enabled:Boolean(e.BINANCE_LIVE_DESKTOP_TOKEN)});
   if(operation==='request'&&m==='POST'){await limit(e,'live-desktop-order',5);return json(await submitLocalLive(e.DB,await body(r)))}
+  if(operation==='account'&&m==='GET')return json(await readLocalLiveAccount(e.DB));
+  if(operation==='action'&&m==='POST'){await limit(e,'live-desktop-action',10);return json(await submitLocalLiveAction(e.DB,await body(r)))}
   if(operation==='request'&&m==='GET')return json(await readLocalLiveRequest(e.DB,u.searchParams.get('id')));
   throw new Failure('NOT_FOUND',404);
 }

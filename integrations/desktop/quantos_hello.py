@@ -96,17 +96,20 @@ crypt.CryptUnprotectData.argtypes=[blob_ptr,out,blob_ptr,pointer,pointer,wintype
 kernel.LocalFree.argtypes=[pointer]
 kernel.LocalFree.restype=pointer
 
-def dpapi(data,encrypt):
+def dpapi(data,encrypt,entropy=None):
     raw=ct.create_string_buffer(data)
     incoming=Blob(len(data),ct.cast(raw,pointer))
     result=Blob()
+    entropy_buffer=ct.create_string_buffer(entropy) if entropy is not None else None
+    extra=Blob(len(entropy),ct.cast(entropy_buffer,pointer)) if entropy_buffer is not None else None
     action=crypt.CryptProtectData if encrypt else crypt.CryptUnprotectData
     try:
-        if not action(ct.byref(incoming),None,None,None,None,1,ct.byref(result)):
+        if not action(ct.byref(incoming),None,ct.byref(extra) if extra is not None else None,None,None,1,ct.byref(result)):
             raise ct.WinError(ct.get_last_error())
         return ct.string_at(result.data,result.length)
     finally:
         ct.memset(raw,0,len(data))
+        if entropy_buffer is not None: ct.memset(entropy_buffer,0,len(entropy))
         if result.data:
             ct.memset(result.data,0,result.length)
             kernel.LocalFree(result.data)
