@@ -95,3 +95,26 @@
 .exchange-panel .phone-position-list { display: grid; gap: 8px; }
 .exchange-panel .phone-position dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 8px 0; gap: 8px; }
 .exchange-panel .phone-position dd { margin: 0; overflow-wrap: anywhere; }
+
+
+.binance-switch { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+.binance-switch button { display:flex; justify-content:flex-start; min-width:0; min-height:58px; gap:10px; padding:10px 14px; text-align:left; }
+.binance-switch button span { display:grid; gap:3px; }
+.binance-switch button small { font-size:11px; }
+.binance-switch button[aria-pressed=true] { background:#faedc5; color:#664708; border-color:#9d780f; box-shadow:inset 0 0 0 1px #9d780f; }
+.binance-switch-phone { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.binance-switch-phone button { justify-content:center; min-height:44px; padding:6px; }
+.binance-today { background:#f6faf6; }
+.binance-today-values { display:grid; grid-template-columns:1.35fr repeat(2,minmax(0,1fr)); gap:1px; padding:0 16px 12px; }
+.binance-today-values div { display:grid; gap:5px; padding:12px; background:#e7efe9; min-width:0; }
+.binance-today-values .today-net { background:#dbeae2; }
+.binance-today-values b { font-size:clamp(16px,3vw,28px); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.binance-today-values span, .binance-today-time { font-size:12px; }
+.binance-today-time { padding:0 16px 12px; margin:0; }
+.binance-bill-summary { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; padding-bottom:0; }
+.binance-bills .phone-position small { display:block; margin-top:4px; }
+@media(max-width:540px) {
+  .binance-today-values { grid-template-columns:repeat(2,minmax(0,1fr)); padding-inline:12px; }
+  .binance-today-values .today-net { grid-column:1/-1; }
+  .binance-today-values .today-net b { font-size:26px; }
+}

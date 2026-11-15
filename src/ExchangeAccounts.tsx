@@ -1,3 +1,4 @@
+import { TodayReturns, type Totals } from './BinanceReturns';
 import FoldPanel from './FoldPanel';
 import BinanceLiveDashboard from './BinanceLiveDashboard';
 import BinanceAccountSettings from './BinanceAccountSettings';
@@ -19,7 +20,7 @@ export function ExchangeMark({ exchange }: { exchange: 'okx' | 'binance' }) {
 
 type PaperOrder = { id:string; symbol:string; side:string; quantity:string; entry:string; mark:string; pnl:string; markAt:number; closedAt?:number;
   leverage?:number; marginRoiPct?:string; liquidationPrice?:string|null; liquidationRisk?:string|null };
-type PaperLedger = { initial:string|null; balance:string|null; available:string|null; realized:string; unrealized:string; orders:PaperOrder[]; closedCount:number };
+type PaperLedger = { initial:string|null; balance:string|null; available:string|null; realized:string; unrealized:string; orders:PaperOrder[]; closedCount:number; today?:Totals };
 const beijingTime = (time:number) => new Date(time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'});
 
 export function BinancePaperLedger({ api, positionsOnly = false }: { api: Api; positionsOnly?: boolean }) {
@@ -43,7 +44,7 @@ export function BinancePaperLedger({ api, positionsOnly = false }: { api: Api; p
 
   const lastQuote = ledger?.orders.reduce((latest, order) => Math.max(latest, order.markAt), 0) ?? 0;
   const openOrders = ledger?.orders.filter(order => !order.closedAt) ?? [];
-  return <section className="panel exchange-panel">
+  return <>{!positionsOnly && <TodayReturns value={ledger?.today} detail="北京时间 00:00 起 · 网站虚拟账本已实现盈亏"/>}<section className="panel exchange-panel">
       <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>{positionsOnly ? '币安虚拟持仓' : '币安虚拟账户收益'}</h2>
         <p>{lastQuote ? '最近记录行情 · ' + beijingTime(lastQuote) + '（北京时间）' : '订单估值随 Chat 写入更新'}</p></div>
         <button disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '读取最新记录'}</button></div>
@@ -74,31 +75,29 @@ export function BinancePaperLedger({ api, positionsOnly = false }: { api: Api; p
           <td>{o.marginRoiPct == null ? '—' : o.marginRoiPct + '%'}</td><td>{o.liquidationPrice ?? '—'}{o.liquidationRisk === 'AT_RISK' && <small className="red">已触及强平线</small>}</td><td>{beijingTime(o.markAt)}</td>
         </tr>)}</tbody></table></div> : <p>暂无虚拟订单。</p>}</>}
       </div>
-    </section>;
+    </section></>;
 }
 
-export function BinanceWorkspace({ api, live = false }: { api: Api; live?: boolean }) {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  useEffect(() => {
-    let active = true;
-    void api('/binance-demo/status').then(status => {
-      if (active) setEnabled(status.enabled === true);
-    }).catch(() => { if (active) setEnabled(false); });
-    return () => { active = false; };
-  }, [api]);
+const accountTitles = { paper: '虚拟账户', demo: '模拟账户', live: '真实账户' };
+export type BinanceAccountMode = keyof typeof accountTitles;
+const subtitles = { paper: 'QuantOS 网站账本', demo: '币安交易所模拟盘', live: '币安交易所实盘' };
 
-  if (live) return <BinanceLiveDashboard api={api}/>;
+export function BinanceAccountSwitcher({mode, onChange, phone = false}: {
+  mode: BinanceAccountMode; onChange: (mode: BinanceAccountMode) => void; phone?: boolean;
+}) {
+  const options: BinanceAccountMode[] = phone ? ['demo', 'live'] : ['paper', 'demo', 'live'];
+  return <div className={phone ? 'binance-switch binance-switch-phone' : 'binance-switch'} role="group" aria-label="币安账户模式">
+    {options.map(option => <button type="button" key={option} aria-pressed={mode === option} onClick={() => onChange(option)}>
+      <ExchangeMark exchange="binance"/><span><strong>{accountTitles[option]}</strong>{!phone && <small>{subtitles[option]}</small>}</span>
+    </button>)}
+  </div>;
+}
 
+export function BinanceWorkspace({api, mode, onModeChange}: {api: Api; mode: BinanceAccountMode; onModeChange: (mode: BinanceAccountMode) => void}) {
   return <div className="exchange-workspace">
-    <section className="panel exchange-panel">
-      <div className="panelhead"><div><h2><ExchangeMark exchange="binance"/>币安 USDⓈ-M 模拟盘 · API 接入</h2>
-        <p>交易所模拟账户。接入后独立展示余额、仓位和未实现盈亏。</p></div>
-        <span className="badge exchange-binance">{enabled === null ? '检查配置中' : enabled ? '接口已启用' : '待接入'}</span></div>
-      {enabled === false && <div className="exchange-body"><p>预留给未来的 VPS。需部署币安模拟盘后端，并在服务端配置模拟盘凭证。</p></div>}
-    </section>
-    {enabled && <BinanceDemoDashboard api={api}/>}
-    <FoldPanel title="虚拟订单账本"><BinancePaperLedger api={api}/></FoldPanel>
-    <FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel>
-    <FoldPanel title="账户设置"><BinanceAccountSettings api={api}/></FoldPanel>
+    <BinanceAccountSwitcher mode={mode} onChange={onModeChange}/>
+    {mode === 'live' && <BinanceLiveDashboard api={api}/>}
+    {mode === 'demo' && <><BinanceDemoDashboard api={api}/><FoldPanel title="模拟账户同步设置"><BinanceAccountSettings api={api}/></FoldPanel></>}
+    {mode === 'paper' && <><BinancePaperLedger api={api}/><FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel></>}
   </div>;
 }

@@ -4,6 +4,26 @@ import { decode } from './binance-demo-trades';
 
 const now = () => new Date().toISOString();
 
+const ledgerKinds = new Set(['REALIZED_PNL', 'COMMISSION', 'FUNDING_FEE']);
+const money = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,30}(?:\.\d{1,24})?$/.test(value);
+
+function sanitizeLedger(input: any) {
+  const totals = (value: any) => value && money(value.net) && money(value.gains) && money(value.losses)
+    ? { net: value.net, gains: value.gains, losses: value.losses } : null;
+  const today = totals(input?.today), period = totals(input?.period);
+  if (!today || !period || ![input.asOf, input.dayStart, input.rangeStart].every(Number.isSafeInteger)
+      || input.rangeStart > input.dayStart || input.dayStart > input.asOf || !Array.isArray(input.bills) || !Array.isArray(input.closed)) return;
+  const lines = (rows: any[]) => rows.slice(0, 40).flatMap(row => {
+    if (!row || !ledgerKinds.has(row.kind) || !money(row.income) || row.asset !== 'USDT'
+        || !Number.isSafeInteger(row.time) || typeof row.symbol !== 'string' || row.symbol.length > 40
+        || typeof row.tranId !== 'string' || row.tranId.length > 40) return [];
+    return [{ kind: row.kind, income: row.income, asset: 'USDT', time: row.time, symbol: row.symbol,
+      tranId: row.tranId, tradeId: typeof row.tradeId === 'string' ? row.tradeId.slice(0, 40) : '' }];
+  });
+  return { asOf: input.asOf, dayStart: input.dayStart, rangeStart: input.rangeStart, complete: input.complete === true,
+    today, period, bills: lines(input.bills), closed: lines(input.closed).filter(row => row.kind === 'REALIZED_PNL') };
+}
+
 export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live = false) {
   const cacheKey = live ? 'binance_live_snapshot' : 'binance_demo_snapshot';
   if (!input || !Array.isArray(input.positions) || input.positions.length > 500 || !Array.isArray(input.account?.assets))
@@ -11,10 +31,11 @@ export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live 
   const snapshot = await fetchDemoSnapshot(env, async (_method, path) =>
     path === '/fapi/v3/account' ? input.account : input.positions);
   const history=Array.isArray(input.history)?input.history.slice(0,20).filter((x:any)=>x && typeof x.symbol==='string' && typeof x.income==='string' && Number.isSafeInteger(x.time)) : undefined;
-  if(history===undefined){
-    const old=await env.DB.prepare('SELECT value FROM system_settings WHERE key=?').bind(cacheKey).first<string>('value');
-    if(old) Object.assign(snapshot,{history:JSON.parse(old).history});
-  } else Object.assign(snapshot,{history});
+  const ledger=sanitizeLedger(input.ledger);
+  const old=await env.DB.prepare('SELECT value FROM system_settings WHERE key=?').bind(cacheKey).first<string>('value');
+  const previous=old?JSON.parse(old):null;
+  Object.assign(snapshot,{history:history??previous?.history,
+    ledger:ledger&&(!previous?.ledger||ledger.asOf>=previous.ledger.asOf)?ledger:previous?.ledger});
   await env.DB.prepare('INSERT OR REPLACE INTO system_settings(key,value) VALUES(?,?)')
     .bind(cacheKey,JSON.stringify(snapshot)).run();
   return {updatedAt:snapshot.updatedAt};

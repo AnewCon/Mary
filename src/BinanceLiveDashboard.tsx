@@ -1,8 +1,10 @@
+import { BinanceReturns, type BinanceLedger } from './BinanceReturns';
 import { useCallback, useEffect, useState } from 'react';
 
 type Position = { symbol: string; side: string; quantity: string; entryPrice: string; markPrice: string; unrealizedPnl: string; marginAsset: string };
 type Snapshot = {
   updatedAt: string;
+  ledger?: BinanceLedger;
   account: { walletBalance: string; availableBalance: string; marginBalance: string; unrealizedPnl: string } | null;
   positions: Position[];
 };
@@ -34,7 +36,7 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
     }, 10_000);
     return () => { active = false; window.clearInterval(timer); window.clearInterval(presence); };
   }, [api, load]);
-  return <section className="panel exchange-panel">
+  return <><section className="panel exchange-panel">
     <div className="panelhead"><div><h2>币安真实账户</h2>
       <p>{agent===null?'检查本地面板':agent?'本地面板在线 · 自动执行已确认请求':'本地面板离线或未就绪'}</p>
       {snapshot && <p>北京时间 {new Date(snapshot.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}
@@ -54,5 +56,5 @@ export default function BinanceLiveDashboard({ api, view = 'all' }: { api: Api; 
             <div><dt>标记价</dt><dd>{p.markPrice}</dd></div><div><dt>未实现盈亏</dt><dd className={Number(p.unrealizedPnl)<0?'red':'green'}>{p.unrealizedPnl} {p.marginAsset}</dd></div></dl>
         </article>)}</div> : <p>当前没有持仓。</p>)}
     </div>
-  </section>;
+  </section><BinanceReturns ledger={snapshot?.ledger} view={view} waiting="等待新版 Windows 面板同步真实账户流水"/></>;
 }

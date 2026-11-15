@@ -1,7 +1,7 @@
 import { useId, useState, type ReactNode } from 'react';
 
-export default function FoldPanel({ title, children }: { title: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+export default function FoldPanel({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   return <section className="panel fold-panel">
     <h2><button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>

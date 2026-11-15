@@ -39,12 +39,21 @@ function orderView(order: Order) {
 }
 function view(state: Ledger|null) {
   const orders = state?.orders ?? [];
+  const dayStart = Math.floor((Date.now()+28_800_000)/86_400_000)*86_400_000-28_800_000;
+  const today = orders.reduce((totals, order) => {
+    if (!order.closedAt || order.closedAt < dayStart) return totals;
+    const result = pnl(order);
+    if (result > 0n) totals.gains += result;
+    else totals.losses += result;
+    return totals;
+  }, {gains:0n, losses:0n});
   const realized = orders.reduce((n,o) => n + (o.closedAt ? pnl(o) : 0n), 0n);
   const floating = orders.reduce((n,o) => n + (!o.closedAt ? pnl(o) : 0n), 0n);
   const held = orders.reduce((n,o) => n + (!o.closedAt ? decimal(o.margin) : 0n), 0n);
   const cash = state ? decimal(state.initial) + realized : 0n;
   return { account: '币安虚拟账户', mode: 'paper', currency: 'USDT', initial: state?.initial ?? null,
     balance: state ? text(cash) : null, available: state ? text(cash-held) : null,
+    today: state ? {net:text(today.gains+today.losses), gains:text(today.gains), losses:text(today.losses)} : undefined,
     realized: text(realized), unrealized: text(floating), closedCount:orders.filter(o=>o.closedAt).length,
     maintenanceMarginRatePct: '0.5',
     orders: [...orders.filter(o=>!o.closedAt), ...orders.filter(o=>o.closedAt).reverse().slice(0,40)].map(orderView) };

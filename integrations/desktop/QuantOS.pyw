@@ -14,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
 from quantos_hello import HelloRequest
+from binance_history import account_history
 from quantos_live_actions import execute_action, LiveValidationError, READ_ACTIONS, SIGNED_ENDPOINTS
 from quantos_usb_cue import UsbCue
 from quantos_usb import removable_drives, existing_usb_key, usb_load, usb_store
@@ -79,6 +80,7 @@ class Connection:
     def __init__(self, token, key, secret, proxy):
         self.token, self.key, self.secret = token, key, secret.encode()
         self.opener = client(proxy)
+        self.history_due = 0
     def cloud(self, operation, payload):
         result=read_json(self.opener,CLOUD+operation,method="POST",
             headers={"Authorization":"Bearer "+self.token,"Content-Type":"application/json"},
@@ -88,7 +90,7 @@ class Connection:
         return result["data"]
     def signed(self, path, params=None, method="GET"):
         allowed={("GET","/fapi/v3/account"),("GET","/fapi/v3/positionRisk"),
-                 ("GET","/fapi/v1/positionSide/dual"),("POST","/fapi/v1/order")}
+                 ("GET","/fapi/v1/positionSide/dual"),("GET","/fapi/v1/income"),("POST","/fapi/v1/order")}
         if (method,path) not in allowed | SIGNED_ENDPOINTS:
             raise ValueError("unsupported path")
         query=urllib.parse.urlencode({**(params or {}),"timestamp":int(time.time()*1000),"recvWindow":5000})
@@ -103,8 +105,15 @@ class Connection:
         assets=[{k:a[k] for k in ("asset","walletBalance","availableBalance","marginBalance","unrealizedProfit")}
                 for a in account["assets"] if a["asset"]=="USDT"]
         fields=("symbol","positionSide","positionAmt","marginAsset","entryPrice","markPrice","unRealizedProfit")
-        self.cloud("snapshot",{"account":{"assets":assets},
-            "positions":[{k:p[k] for k in fields} for p in positions if Decimal(p["positionAmt"])]})
+        payload={"account":{"assets":assets},
+                 "positions":[{k:p[k] for k in fields} for p in positions if Decimal(p["positionAmt"])]}
+        if time.monotonic() >= self.history_due:
+            self.history_due = time.monotonic() + 300
+            try:
+                payload["ledger"] = account_history(lambda params: self.signed("/fapi/v1/income", params))
+            except (ApiError, OSError, ValueError, KeyError, TypeError, ArithmeticError):
+                pass  # Balance and current positions still sync independently.
+        self.cloud("snapshot",payload)
     def execute(self, job):
         if "action" in job:
             return execute_action(self,job)

@@ -1,6 +1,7 @@
 import hashlib,hmac,json,time,urllib.request,urllib.error,urllib.parse,os
 from decimal import Decimal
 from pathlib import Path
+from binance_history import account_history
 
 config=json.load(open('/etc/quantos-binance/config.json'))
 cf='https://marya-4j3.pages.dev/api/binance-demo/agent/'
@@ -51,8 +52,7 @@ def snapshot(include_history=False):
     data={'account':{'assets':[a for a in account['assets'] if a['asset']=='USDT']},'positions':positions}
     if include_history:
         try:
-            income=exchange('/fapi/v1/income',params={'incomeType':'REALIZED_PNL','limit':20})
-            data['history']=[{k:row[k] for k in ('symbol','income','asset','time','tranId')} for row in income]
+            data['ledger']=account_history(lambda params: exchange('/fapi/v1/income',params=params))
         except Exception as e:
             print('history failed',getattr(e,'code',type(e).__name__),flush=True)
     cloud('snapshot',data)

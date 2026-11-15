@@ -1,3 +1,4 @@
+import { BinanceReturns, type BinanceLedger } from './BinanceReturns';
 import FoldPanel from './FoldPanel';
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
@@ -9,7 +10,7 @@ interface DemoAccount {
   stale: boolean;
   snapshot: {
     updatedAt: string;
-    history?: {symbol:string;income:string;asset:string;time:number;tranId:string|number}[];
+    ledger?: BinanceLedger;
     account: {
       walletBalance: string;
       availableBalance: string;
@@ -110,6 +111,7 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
       </div>
     </div>
     {(refreshError || readError) && <div className="alert" role="alert">同步失败 · {refreshError || readError}</div>}
+    {view !== 'positions' && <BinanceReturns ledger={snapshot?.ledger} view={view === 'all' ? 'earnings' : view} waiting="等待 VPS 同步收益流水"/>}
     {view !== 'positions' && <div className="metrics">
       {metrics.map(([label, field]) => <div className="metric" key={field}>
         <div>{label}</div><b>{amount(snapshot?.account?.[field])}</b><small>USDT</small>
@@ -135,14 +137,7 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
         </tr>)}</tbody>
       </table></div> : <div className="empty">{snapshot ? (data?.stale ? '上次同步时没有持仓，请立即同步确认。' : '当前没有持仓') : '等待账户数据'}</div>}
     </div>}
-    {view !== 'earnings' && <FoldPanel title="历史持仓收益">
-      <div className="exchange-body">
-        {snapshot?.history?.length ? <div className="phone-position-list">{snapshot.history.map(row=><article className="phone-position" key={row.asset+':'+row.tranId}>
-          <div><strong>{row.symbol}</strong><strong className={Number(row.income)<0?'red':'green'}>{amount(row.income)} {row.asset}</strong></div>
-          <small>{new Date(row.time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}（北京时间） · 已实现盈亏</small>
-        </article>)}</div> : <p>{snapshot?.history?'暂无已实现盈亏记录':'等待 VPS 同步历史记录'}</p>}
-      </div>
-    </FoldPanel>}
+    {view !== 'earnings' && <BinanceReturns ledger={snapshot?.ledger} view="positions" waiting="等待 VPS 同步平仓记录"/>}
     {view === 'all' && data?.configured && data.tradingEnabled && <FoldPanel title="模拟盘交易"><BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
       onApplied={() => void refresh()} /></FoldPanel>}
   </>;
