@@ -68,6 +68,24 @@ def live_snapshot():
     cloud('live-snapshot',{'account':{'assets':[a for a in account['assets'] if a['asset']=='USDT']},
         'positions':[p for p in positions if Decimal(p['positionAmt'])!=0]})
 
+def order_context(symbol, direction):
+    if direction not in {'LONG','SHORT'}:
+        raise Upstream('INVALID_ACTION')
+    mode=exchange('/fapi/v1/positionSide/dual')
+    hedge=mode.get('dualSidePosition') if isinstance(mode,dict) else None
+    if type(hedge) is not bool:
+        raise Upstream('POSITION_MODE_UNAVAILABLE')
+    position_side=direction if hedge else 'BOTH'
+    allowed_sides={'LONG','SHORT'} if hedge else {'BOTH'}
+    positions=exchange('/fapi/v3/positionRisk',params={'symbol':symbol})
+    active=[p for p in positions if p['symbol']==symbol and Decimal(p['positionAmt'])!=0]
+    if any(p.get('positionSide') not in allowed_sides for p in active):
+        raise Upstream('POSITION_MODE_MISMATCH')
+    position=next((p for p in active if p['positionSide']==position_side and
+                   (hedge or (Decimal(p['positionAmt'])>0)==(direction=='LONG'))),None)
+    return hedge,position_side,position,bool(active)
+
+
 def execute(job):
     action=job['action']
     kind=action['kind']
@@ -102,17 +120,10 @@ def execute(job):
         result=exchange('/fapi/v1/leverage','POST',{'symbol':symbol,'leverage':action['leverage']})
         return {'leverage':result['leverage'],'symbol':result['symbol']}
     side=action['side']
-    positions=exchange('/fapi/v3/positionRisk',params={'symbol':symbol})
-    hedge=exchange('/fapi/v1/positionSide/dual')['dualSidePosition']
-    if type(hedge) is not bool: raise ValueError('Invalid position mode')
-    position_side=side if hedge else 'BOTH'
-    active=[p for p in positions if p['symbol']==symbol and Decimal(p['positionAmt'])!=0]
-    def direction(position):
-        return position['positionSide'] if hedge else 'LONG' if Decimal(position['positionAmt'])>0 else 'SHORT'
+    hedge,position_side,position,has_positions=order_context(symbol,side)
     params={'symbol':symbol,'positionSide':position_side,'type':'MARKET','newClientOrderId':'qos_'+job['id'],'newOrderRespType':'RESULT'}
 
     if kind=='protect':
-        position=next((p for p in active if direction(p)==side),None)
         if not position: raise Upstream('POSITION_CHANGED')
         closing_side='SELL' if side=='LONG' else 'BUY'
         existing=exchange('/fapi/v1/openAlgoOrders',params={'symbol':symbol})
@@ -127,7 +138,6 @@ def execute(job):
         return {'algoId':str(result['algoId']),'algoStatus':result.get('algoStatus'),'triggerPrice':result.get('triggerPrice')}
 
     if kind=='close':
-        position=next((p for p in active if direction(p)==side),None)
         if not position: raise Upstream('POSITION_CHANGED')
         contract=next(p for p in exchange('/fapi/v1/exchangeInfo')['symbols'] if p['symbol']==symbol)
         filters={f['filterType']:f for f in contract['filters']}
@@ -139,7 +149,7 @@ def execute(job):
         params['quantity']=format(quantity,'f')
         if not hedge: params['reduceOnly']='true'
     elif kind in {'open','limit'}:
-        if not hedge and any(direction(p)!=side for p in active): raise Upstream('OPPOSITE_POSITION')
+        if not hedge and has_positions and not position: raise Upstream('OPPOSITE_POSITION')
         params['quantity']=action['quantity']
         if kind=='limit': params.update(type='LIMIT',price=action['price'],timeInForce='GTC')
     else: raise Upstream('INVALID_ACTION')
@@ -172,6 +182,13 @@ def bracket_entry(job):
     result=execute({'id':job['id'],'bracketEntry':True,'action':{**action,'kind':'limit'}})
     return {**result,'protectionState':'waiting_fill'}
 
+def report_bracket(file,job,result):
+    if job.get('lastReport')!=result:
+        cloud('result',{'id':job['id'],'state':'acknowledged','result':result})
+        job['lastReport']=result
+        atomic_json(file,job)
+
+
 def monitor_bracket(file):
     job=json.loads(file.read_text())
     action=job['action']
@@ -188,12 +205,18 @@ def monitor_bracket(file):
         if order['status'] not in {'CANCELED','EXPIRED','REJECTED','EXPIRED_IN_MATCH'}: return
         result['protectionState']='entry_canceled'
     else:
-        hedge=exchange('/fapi/v1/positionSide/dual')['dualSidePosition']
-        pos_side=action['side'] if hedge else 'BOTH'
+        try:
+            _,pos_side,position,_=order_context(symbol,action['side'])
+            if order.get('positionSide')!=pos_side:
+                raise Upstream('BRACKET_POSITION_MODE_MISMATCH')
+        except Upstream as error:
+            if error.code not in {'POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','BRACKET_POSITION_MODE_MISMATCH'}:
+                raise
+            result.update(protectionState='protection_error',code=error.code)
+            report_bracket(file,job,result)
+            return
         opposite='SELL' if action['side']=='LONG' else 'BUY'
-        positions=exchange('/fapi/v3/positionRisk',params={'symbol':symbol})
-        active=any(p['positionSide']==pos_side and Decimal(p['positionAmt'])!=0 and
-                   (hedge or (Decimal(p['positionAmt'])>0)==(action['side']=='LONG')) for p in positions)
+        active=position is not None
         legs={}
         for key,kind,suffix in [('stopLoss','STOP_MARKET','s'),('takeProfit','TAKE_PROFIT_MARKET','t')]:
             leg_id='qb'+job['id']+suffix
@@ -216,10 +239,7 @@ def monitor_bracket(file):
         result.update(protectionState=('armed' if armed else 'protection_error') if active else 'completed',protection=legs)
         if not active and order['status'] in {'NEW','PARTIALLY_FILLED'}:
             exchange('/fapi/v1/order','DELETE',{'symbol':symbol,'orderId':order['orderId']})
-    if job.get('lastReport')!=result:
-        cloud('result',{'id':job['id'],'state':'acknowledged','result':result})
-        job['lastReport']=result
-        atomic_json(file,job)
+    report_bracket(file,job,result)
     if result['protectionState'] in {'completed','entry_canceled'}: file.unlink()
 
 
@@ -227,7 +247,7 @@ def process(job):
     result={'id':job['id']}
     try: result.update(state='acknowledged',result=bracket_entry(job) if job['action']['kind']=='bracket' else execute(job))
     except Upstream as e:
-        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'POSITION_CHANGED','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
+        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
         result.update(state='rejected' if certain else 'unknown',result={'code':str(e.code)})
     except Exception: result.update(state='unknown',result={'code':'VERIFY_BINANCE_BEFORE_RETRY'})
     tmp=spool.with_suffix('.tmp')
