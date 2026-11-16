@@ -2,6 +2,7 @@ import { Failure } from './exchange';
 import { marketReference } from './market-reference';
 import { contract, oiHistory } from './oi-history';
 import { signal25 } from './signal-v25';
+import { legacyLimits, reviewClosedDaily } from './legacy-execution-review';
 
 const sections={derivatives:'derivatives',oi_history:'oi_history',liquidation_heatmap:'heatmap',recent_liquidations:'liquidations'} as const;
 type Section = keyof typeof sections;
@@ -36,11 +37,16 @@ export async function analyzeMarket(db:D1Database,body:unknown,context:Execution
   const usd=(side:string)=>entries.filter((row:any)=>row.side===side).reduce((total:number,row:any)=>{
     const n=Number(row.notional);return total+(Number.isFinite(n)&&n>0?n:0);
   },0);
+  const daily=reviewClosedDaily((input?.candles as Record<string,unknown>|undefined)?.['1d']);
   return {symbol,asOf:new Date().toISOString(),status:records.every(r=>r.status==='OK')?'OK':'PARTIAL',
     observed:records.filter(r=>r.layer==='observed'),estimated:records.filter(r=>r.layer==='estimated'),
     derived:{oiHistory:dictionary.oi_history??null,liquidationSample:dictionary.recent_liquidations?{
       source:'MarginPad',asOf:dictionary.recent_liquidations.asOf,fetchedAt:dictionary.recent_liquidations.fetchedAt,
       status:dictionary.recent_liquidations.status,data:entries.length?{count:entries.length,longUsd:usd('long_liquidated'),shortUsd:usd('short_liquidated')}:null
     }:null},
-    interpretation:signal25(input?.candles,input?.flow,dictionary,config)};
+    interpretation:signal25(input?.candles,input?.flow,dictionary,config),
+    executionReview:{policy:legacyLimits,mode:'RESEARCH_ONLY',execute:false,decision:'WAIT',dailyFilter:daily,
+      requires:['INDEPENDENT_LEGACY_DIRECTION_AND_ENTRY_SCORES','4H_1H_DIRECTION','15M_STRUCTURE_AND_5M_MANUAL_CONFIRMATION',
+        'VERIFIED_ACCOUNT_WIDE_RISK_AND_CORRELATION','VERIFIED_DEMO_LIMIT_PROTECTION']}};
+
 }
