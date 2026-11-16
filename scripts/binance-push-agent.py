@@ -44,7 +44,7 @@ def exchange(path,method='GET',params=None,live=None):
         raise Upstream(result['code'])
     return result
 
-def snapshot(include_history=False):
+def snapshot(include_history=False, reset_at=0):
     account=exchange('/fapi/v3/account')
     positions=exchange('/fapi/v3/positionRisk')
     if not isinstance(account.get('assets'),list) or not isinstance(positions,list):
@@ -53,7 +53,7 @@ def snapshot(include_history=False):
     data={'account':{'assets':[a for a in account['assets'] if a['asset']=='USDT']},'positions':positions}
     if include_history:
         try:
-            data['ledger']=account_history(lambda params: exchange('/fapi/v1/income',params=params))
+            data['ledger']=account_history(lambda params: exchange('/fapi/v1/income',params=params), reset_at)
         except Exception as e:
             print('history failed',getattr(e,'code',type(e).__name__),flush=True)
     cloud('snapshot',data)
@@ -214,6 +214,7 @@ def main():
     recover_legacy=True
     live_due=0
     mode='paused'
+    reset_at=0
     marker=spool.with_name('sync-active')
     while True:
         current=time.monotonic()
@@ -223,7 +224,12 @@ def main():
             except Exception as e: print('live read failed',getattr(e,'code',type(e).__name__),flush=True)
         if current>=config_due:
             try:
-                next_mode=cloud('sync-mode',{})['mode']
+                settings=cloud('sync-mode',{})
+                next_mode=settings['mode']
+                next_reset=settings.get('todayResetAt',0)
+                if next_reset!=reset_at:
+                    reset_at=next_reset
+                    due=history_due=0
                 if next_mode!=mode: due=0
                 mode=next_mode
                 if recover_legacy:
@@ -237,7 +243,7 @@ def main():
             config_due=current+60
         if current>=due and mode!='paused' and (bootstrap or mode=='always' or mode=='on_open' and marker.exists()):
             try:
-                active=snapshot(current>=history_due)
+                active=snapshot(current>=history_due, reset_at)
                 if bootstrap and active: marker.touch()
                 bootstrap=False
                 if current>=history_due: history_due=current+300
@@ -270,7 +276,8 @@ def main():
                     if kind=='refresh_snapshot':
                         report={'id':job['id']}
                         try:
-                            active=snapshot(True)
+                            reset_at=cloud('sync-mode',{}).get('todayResetAt',0)
+                            active=snapshot(True, reset_at)
                             if mode=='on_open' and active: marker.touch()
                             bootstrap=False
                             due=time.monotonic()+60

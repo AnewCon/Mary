@@ -5,12 +5,13 @@ BEIJING = timezone(timedelta(hours=8))
 KINDS = {"REALIZED_PNL", "COMMISSION", "FUNDING_FEE"}
 
 
-def account_history(fetch_income):
+def account_history(fetch_income, reset_at=0):
     now = datetime.now(BEIJING)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = int((midnight - timedelta(days=6)).timestamp() * 1000)
     end = int(now.timestamp() * 1000)
     today = int(midnight.timestamp() * 1000)
+    reset_at = reset_at if today <= reset_at <= end else 0
     rows = {}
     complete = False
     for page in range(1, 9):
@@ -42,5 +43,6 @@ def account_history(fetch_income):
                 "losses": format(sum((x for x in amounts if x < 0), Decimal(0)), "f")}
 
     return {"asOf": end, "dayStart": today, "rangeStart": start, "complete": complete,
-            "today": totals(row for row in ordered if row["time"] >= today), "period": totals(ordered),
+            "resetAt": reset_at,
+            "today": totals(row for row in ordered if row["time"] >= today and row["time"] > reset_at), "period": totals(ordered),
             "bills": ordered[:40], "closed": [row for row in ordered if row["kind"] == "REALIZED_PNL"][:40]}

@@ -1,5 +1,5 @@
 import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest, submitLocalLiveAction, readLocalLiveAccount } from './binance-live-local';
-import { publishDemoSnapshot, enqueueDemo, enqueueDemoRefresh, listDemoLimits, legacyDemoLimits, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
+import { publishDemoSnapshot, enqueueDemo, enqueueDemoRefresh, listDemoLimits, legacyDemoLimits, demoTodayResetAt, resetDemoToday, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
 import { readBinanceDemo, type BinanceDemoEnv } from './binance-demo';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
 import { paperOrders, writePaperOrder } from './paper-orders';
@@ -60,7 +60,7 @@ if(p.startsWith('/api/binance-demo/')){
   if(p.startsWith('/api/binance-demo/agent/')&&m==='POST'){
     const secret=e.BINANCE_DEMO_RELAY_TOKEN;
     if(!secret||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
-    if(p.endsWith('/sync-mode'))return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open'});
+    if(p.endsWith('/sync-mode'))return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open',todayResetAt:await demoTodayResetAt(e.DB)});
     if(p.endsWith('/snapshot'))return json(await publishDemoSnapshot(e,await body(r)));
     if(p.endsWith('/legacy-limits'))return json(await legacyDemoLimits(e.DB));
     if(p.endsWith('/claim'))return json(await claimDemo(e.DB,e.MCP_DEMO_TRADING_ENABLED==='true'));
@@ -78,7 +78,14 @@ if(p.startsWith('/api/binance-demo/')){
   }
   if(!enabled)throw new Failure('BINANCE_DEMO_DISABLED',404);
   const binance={...e,BINANCE_DEMO_TRADING_ENABLED:tradingEnabled?'true':'false'};
-  if(p.endsWith('/account')&&m==='GET')return json(await readBinanceDemo(binance));
+  if(p.endsWith('/account')&&m==='GET'){
+    const [data,todayResetAt]=await Promise.all([readBinanceDemo(binance),demoTodayResetAt(e.DB)]);
+    return json({...data,todayResetAt});
+  }
+  if(p.endsWith('/today/reset')&&m==='POST'){
+    await limit(e,'binance-demo-today-reset',5);
+    return json(await resetDemoToday(e.DB));
+  }
   if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await enqueueDemoRefresh(e.DB))}
   if(query){const input=await body(r);if(!['orders','contract','query'].includes(input?.kind))throw new Failure('INVALID_DEMO_QUERY');await limit(e,'binance-demo-query',15);return json(await enqueueDemo(e.DB,input))}
   if(p.endsWith('/limits')&&m==='GET')return json(await listDemoLimits(e.DB));

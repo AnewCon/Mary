@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react';
 import FoldPanel from './FoldPanel';
 
 export type Totals = { net: string; gains: string; losses: string };
 type Bill = { kind: 'REALIZED_PNL' | 'COMMISSION' | 'FUNDING_FEE'; income: string; symbol: string; time: number; tranId: string; tradeId?: string };
 export type BinanceLedger = {
-  asOf: number; dayStart: number; rangeStart: number; complete: boolean;
+  asOf: number; dayStart: number; resetAt?: number; rangeStart: number; complete: boolean;
   today: Totals; period: Totals; bills: Bill[]; closed: Bill[];
 };
 
@@ -12,9 +13,9 @@ const labels = { REALIZED_PNL: '已实现盈亏', COMMISSION: '手续费', FUNDI
 const color = (value?: string) => Number(value) > 0 ? 'green' : Number(value) < 0 ? 'red' : '';
 const format = (value?: string) => value === undefined ? '—' : Number(value).toLocaleString('en-US', {maximumFractionDigits: 6, minimumFractionDigits: 2, signDisplay: 'exceptZero'});
 
-export function TodayReturns({value, detail, updated}: {value?: Totals; detail: string; updated?: number}) {
+export function TodayReturns({value, detail, updated, action}: {value?: Totals; detail: string; updated?: number; action?: ReactNode}) {
   return <section className="panel binance-today" aria-label="今日收益">
-    <div className="panelhead"><div><h2>今日收益</h2><p>{detail}</p></div><span className="badge">USDT</span></div>
+    <div className="panelhead"><div><h2>今日收益</h2><p>{detail}</p></div><div className="actions"><span className="badge">USDT</span>{action}</div></div>
     <div className="binance-today-values">
       <div className="today-net"><span>今日净收益</span><b className={color(value?.net)}>{format(value?.net)}</b></div>
       <div><span>今日赚取</span><b className={color(value?.gains)}>{format(value?.gains)}</b></div>
@@ -24,14 +25,19 @@ export function TodayReturns({value, detail, updated}: {value?: Totals; detail: 
   </section>;
 }
 
-export function BinanceReturns({ledger, view, waiting}: {ledger?: BinanceLedger; view: 'all' | 'earnings' | 'positions'; waiting: string}) {
+export function BinanceReturns({ledger, view, waiting, todayResetAt = 0, resetAction}: {ledger?: BinanceLedger; todayResetAt?: number; resetAction?: ReactNode; view: 'all' | 'earnings' | 'positions'; waiting: string}) {
   const todayStart = Math.floor((Date.now() + 28_800_000) / 86_400_000) * 86_400_000 - 28_800_000;
-  const today = ledger?.complete && ledger.dayStart === todayStart ? ledger.today : undefined;
-  const detail = today ? '北京时间 00:00 起 · 已实现盈亏、手续费与资金费'
+  const resetAt = todayResetAt >= todayStart ? todayResetAt : 0;
+  const waitingForReset = resetAt > 0 && (ledger?.resetAt !== resetAt || ledger.asOf < resetAt);
+  const today = waitingForReset ? {net:'0', gains:'0', losses:'0'}
+    : ledger?.complete && ledger.dayStart === todayStart ? ledger.today : undefined;
+  const detail = resetAt ? `北京时间 ${new Date(resetAt).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})} 重置`
+    + (waitingForReset ? ' · 等待同步重置后的流水' : !ledger?.complete ? ' · 流水待完整同步' : ' · 已实现盈亏、手续费与资金费')
+    : today ? '北京时间 00:00 起 · 已实现盈亏、手续费与资金费'
     : ledger && !ledger.complete ? '流水超过同步上限，等待完整数据'
     : ledger && ledger.dayStart !== todayStart ? '等待同步今天的收益' : waiting;
   return <>
-    {view !== 'positions' && <TodayReturns value={today} detail={detail} updated={ledger?.asOf}/>}
+    {view !== 'positions' && <TodayReturns value={today} detail={detail} updated={waitingForReset ? undefined : ledger?.asOf} action={resetAction}/>}
     {view !== 'earnings' && <FoldPanel title="历史仓位 · 平仓记录">
       <BillList rows={ledger?.closed} waiting={waiting} closed/>
     </FoldPanel>}

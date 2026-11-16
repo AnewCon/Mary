@@ -2,11 +2,12 @@ import BinanceLimitOrders from './BinanceLimitOrders';
 import { BinanceReturns, type BinanceLedger } from './BinanceReturns';
 import FoldPanel from './FoldPanel';
 import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, RotateCcw } from 'lucide-react';
 import BinanceDemoTradeForm from './BinanceDemoTradeForm';
 
 interface DemoAccount {
   configured: boolean;
+  todayResetAt?: number;
   tradingEnabled: boolean;
   stale: boolean;
   snapshot: {
@@ -49,6 +50,9 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
   const [busy, setBusy] = useState(false);
   const [readError, setReadError] = useState('');
   const [refreshError, setRefreshError] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [lastReset, setLastReset] = useState(0);
+  const [resetError, setResetError] = useState('');
   useEffect(() => {
     let mounted = true;
     async function load() {
@@ -96,6 +100,19 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
     }
   }
 
+  async function resetToday() {
+    setResetting(true);
+    setResetError('');
+    try {
+      const result = await api('/binance-demo/today/reset', {});
+      setLastReset(result.todayResetAt);
+    } catch {
+      setResetError('重置失败，请重试。');
+    } finally {
+      setResetting(false);
+    }
+  }
+
   const snapshot = data?.snapshot;
   const updated = snapshot && new Date(snapshot.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   return <>
@@ -112,7 +129,11 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
       </div>
     </div>
     {(refreshError || readError) && <div className="alert" role="alert">同步失败 · {refreshError || readError}</div>}
-    {view !== 'positions' && <BinanceReturns ledger={snapshot?.ledger} view={view === 'all' ? 'earnings' : view} waiting="等待 VPS 同步收益流水"/>}
+    {view !== 'positions' && <BinanceReturns ledger={snapshot?.ledger} view={view === 'all' ? 'earnings' : view} waiting="等待 VPS 同步收益流水" todayResetAt={Math.max(lastReset,data?.todayResetAt ?? 0)}
+      resetAction={<button type="button" disabled={resetting || !data?.configured} onClick={()=>void resetToday()}>
+        <RotateCcw size={14}/>{resetting ? '重置中…' : '重置今日收益'}
+      </button>}/> }
+    {resetError && <div className="alert" role="alert">{resetError}</div>}
     {view !== 'positions' && <div className="metrics">
       {metrics.map(([label, field]) => <div className="metric" key={field}>
         <div>{label}</div><b>{amount(snapshot?.account?.[field])}</b><small>USDT</small>

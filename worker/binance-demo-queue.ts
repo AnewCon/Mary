@@ -20,8 +20,23 @@ function sanitizeLedger(input: any) {
     return [{ kind: row.kind, income: row.income, asset: 'USDT', time: row.time, symbol: row.symbol,
       tranId: row.tranId, tradeId: typeof row.tradeId === 'string' ? row.tradeId.slice(0, 40) : '' }];
   });
-  return { asOf: input.asOf, dayStart: input.dayStart, rangeStart: input.rangeStart, complete: input.complete === true,
+  const resetAt = Number.isSafeInteger(input.resetAt) && input.resetAt >= input.dayStart && input.resetAt <= input.asOf ? input.resetAt : 0;
+  return { asOf: input.asOf, dayStart: input.dayStart, resetAt, rangeStart: input.rangeStart, complete: input.complete === true,
     today, period, bills: lines(input.bills), closed: lines(input.closed).filter(row => row.kind === 'REALIZED_PNL') };
+}
+
+const demoTodayResetKey='binance_demo_today_reset_at';
+
+export async function demoTodayResetAt(db:D1Database) {
+  const resetAt=Number(await db.prepare('SELECT value FROM system_settings WHERE key=?').bind(demoTodayResetKey).first<string>('value'));
+  return Number.isSafeInteger(resetAt)&&resetAt>0?resetAt:0;
+}
+
+export async function resetDemoToday(db:D1Database) {
+  const row=await db.prepare(`INSERT INTO system_settings(key,value) VALUES(?,?)
+    ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(system_settings.value AS INTEGER),CAST(excluded.value AS INTEGER))
+    RETURNING value`).bind(demoTodayResetKey,String(Date.now())).first<{value:string}>();
+  return {todayResetAt:Number(row!.value)};
 }
 
 export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live = false) {
