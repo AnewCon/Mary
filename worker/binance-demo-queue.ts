@@ -61,6 +61,9 @@ export async function enqueueDemo(db: D1Database, input: unknown) {
   const {id}=decoded;
   const extra=input as {strategyVersion?:unknown;triggerType?:unknown;leverage?:unknown};
   let action:typeof decoded.action & {strategyVersion?:string;triggerType?:string;leverage?:number}=decoded.action;
+  if(['open','limit','bracket'].includes(action.kind)&&typeof extra.strategyVersion==='string'&&
+     /^v?2\.5(?:$|[-._])/i.test(extra.strategyVersion))
+    throw new Failure('DEMO_V25_EXECUTION_POLICY_NOT_ALIGNED',409);
   if(action.kind==='limit')throw new Failure('DEMO_LIMIT_REQUIRES_BRACKET',409);
   if(action.kind==='bracket'){
     if(extra.triggerType!==undefined&&extra.triggerType!=='MARK_PRICE'&&extra.triggerType!=='CONTRACT_PRICE')

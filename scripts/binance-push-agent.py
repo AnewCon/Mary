@@ -1,4 +1,4 @@
-import hashlib,hmac,json,time,urllib.request,urllib.error,urllib.parse,os
+import hashlib,hmac,json,re,time,urllib.request,urllib.error,urllib.parse,os
 from decimal import Decimal
 from pathlib import Path
 from binance_history import account_history
@@ -205,9 +205,13 @@ def bracket_entry(job):
 
 def process(job):
     result={'id':job['id']}
-    try: result.update(state='acknowledged',result=bracket_entry(job) if job['action']['kind']=='bracket' else execute(job))
+    try:
+        action=job['action']
+        if action['kind'] in {'open','limit','bracket'} and re.match(r'^v?2\.5(?:$|[-._])',action.get('strategyVersion',''),re.I):
+            raise Upstream('DEMO_V25_EXECUTION_POLICY_NOT_ALIGNED')
+        result.update(state='acknowledged',result=bracket_entry(job) if action['kind']=='bracket' else execute(job))
     except Upstream as e:
-        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'DEMO_LIMIT_VALIDATION_GATE','DEMO_LEVERAGE_NOT_CONFIRMED','DEMO_LIMIT_REQUIRES_BRACKET','DEMO_PROTECTION_RISK_BLOCK','POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
+        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'DEMO_V25_EXECUTION_POLICY_NOT_ALIGNED','DEMO_LIMIT_VALIDATION_GATE','DEMO_LEVERAGE_NOT_CONFIRMED','DEMO_LIMIT_REQUIRES_BRACKET','DEMO_PROTECTION_RISK_BLOCK','POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
         result.update(state='rejected' if certain else 'unknown',result={'code':str(e.code)})
     except Exception: result.update(state='unknown',result={'code':'VERIFY_BINANCE_BEFORE_RETRY'})
     tmp=spool.with_suffix('.tmp')

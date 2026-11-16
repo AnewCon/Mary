@@ -103,6 +103,10 @@ test('demo bracket retry retains the original confirmed request and rejects chan
   const action={id:'d'.repeat(32),kind:'bracket',symbol:'BTCUSDT',side:'LONG',quantity:'0.01',
     price:'100',stopLoss:'90',takeProfit:'120',leverage:10,confirm:true};
   assert.deepEqual(await enqueueDemo(database,action),await enqueueDemo(database,action));
+  await assert.rejects(
+    enqueueDemo(database,{...action,id:'e'.repeat(32),strategyVersion:'2.5-experimental',entryScore:80}),
+    /DEMO_V25_EXECUTION_POLICY_NOT_ALIGNED/
+  );
   const record=await database.prepare('SELECT payload,COUNT(*) AS entries FROM binance_demo_actions').bind().first();
   assert.equal(record.entries,1);
   assert.equal(JSON.parse(record.payload).leverage,10);
