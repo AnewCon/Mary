@@ -90,7 +90,7 @@ async function derivatives(relay: DurableObjectStub, input: string) {
     ratioPeriod:'1h', ratioError:ratio.status==='rejected'?(ratio.reason instanceof Failure?ratio.reason.code:'BYBIT_RATIO_UNAVAILABLE'):undefined};
 }
 
-export async function marketReference(u: URL, context: ExecutionContext, relay: DurableObjectStub) {
+export async function marketReference(u: URL, context: ExecutionContext, relay: DurableObjectStub, cacheConfig?:string) {
   const kind=u.pathname.split('/').at(-1);
   const coin=kind==='overview'?'':symbol(u);
   const limit=kind==='overview'?count(u,20,50):kind==='liquidations'?count(u,20,50):kind==='heatmap'?count(u,6,12):0;
@@ -101,10 +101,26 @@ export async function marketReference(u: URL, context: ExecutionContext, relay: 
   const key = new Request('https://quantos.313919971.workers.dev/.market-cache/v3/'+kind+'/'+coin+'/'+limit);
   const cache = (caches as CacheStorage & {default:Cache}).default;
   const existing = await cache.match(key).catch(()=>null);
-  if (existing) return existing.json();
-  const data=await providers[kind]();
-  const output={fetchedAt:new Date().toISOString(),...data as Row};
-  const ttl=kind==='liquidations'?20:kind==='heatmap'?120:60;
-  context.waitUntil(cache.put(key,new Response(JSON.stringify(output),{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age='+ttl}})).catch(()=>{}));
-  return output;
+  if (existing) {
+    console.log('market_cache',kind,'hit');
+    return existing.json();
+  }
+  const started=Date.now();
+  try{
+    const data=await providers[kind]();
+    const output={fetchedAt:new Date().toISOString(),...data as Row};
+    const defaults=kind==='liquidations'?20:kind==='heatmap'?120:60;
+    let ttl=defaults;
+    try{
+      const value=JSON.parse(cacheConfig??'{}')[kind];
+      if(Number.isInteger(value)&&value>=10&&value<=300)ttl=value;
+    }catch{/* Keep the endpoint default. */}
+    const payload=JSON.stringify(output);
+    console.log('market_cache',kind,'miss',new TextEncoder().encode(payload).byteLength,Date.now()-started);
+    context.waitUntil(cache.put(key,new Response(payload,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age='+ttl}})).catch(()=>{}));
+    return output;
+  }catch(error){
+    console.log('market_cache',kind,'error',error instanceof Failure?error.code:'MARKET_UNAVAILABLE',Date.now()-started);
+    throw error;
+  }
 }

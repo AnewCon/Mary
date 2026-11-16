@@ -1,3 +1,4 @@
+import MarketAnalysis from './MarketAnalysis';
 import { TodayReturns, type Totals } from './BinanceReturns';
 import FoldPanel from './FoldPanel';
 import BinanceLiveDashboard from './BinanceLiveDashboard';
@@ -96,6 +97,7 @@ export function BinanceAccountSwitcher({mode, onChange, phone = false}: {
 export function BinanceWorkspace({api, mode, onModeChange}: {api: Api; mode: BinanceAccountMode; onModeChange: (mode: BinanceAccountMode) => void}) {
   return <div className="exchange-workspace">
     <BinanceAccountSwitcher mode={mode} onChange={onModeChange}/>
+    <MarketAnalysis api={api}/>
     {mode === 'live' && <BinanceLiveDashboard api={api}/>}
     {mode === 'demo' && <><BinanceDemoDashboard api={api}/><FoldPanel title="模拟账户同步设置"><BinanceAccountSettings api={api}/></FoldPanel></>}
     {mode === 'paper' && <><BinancePaperLedger api={api}/><FoldPanel title="交易复盘"><PaperReviews api={api}/></FoldPanel></>}

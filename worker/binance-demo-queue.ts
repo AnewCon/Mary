@@ -59,15 +59,17 @@ export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live 
 export async function enqueueDemo(db: D1Database, input: unknown) {
   const decoded=decode(input);
   const {id}=decoded;
-  const extra=input as {strategyVersion?:unknown;triggerType?:unknown};
-  let action:typeof decoded.action & {strategyVersion?:string;triggerType?:string}=decoded.action;
+  const extra=input as {strategyVersion?:unknown;triggerType?:unknown;leverage?:unknown};
+  let action:typeof decoded.action & {strategyVersion?:string;triggerType?:string;leverage?:number}=decoded.action;
   if(action.kind==='limit')throw new Failure('DEMO_LIMIT_REQUIRES_BRACKET',409);
   if(action.kind==='bracket'){
     if(extra.triggerType!==undefined&&extra.triggerType!=='MARK_PRICE'&&extra.triggerType!=='CONTRACT_PRICE')
       throw new Failure('INVALID_DEMO_TRIGGER');
     if(extra.strategyVersion!==undefined&&(typeof extra.strategyVersion!=='string'||!/^[A-Za-z0-9._-]{1,40}$/.test(extra.strategyVersion)))
       throw new Failure('INVALID_STRATEGY_VERSION');
-    action={...action,strategyVersion:extra.strategyVersion as string|undefined??'2.3',triggerType:extra.triggerType as string|undefined??'MARK_PRICE'};
+    if(extra.leverage!==undefined&&(typeof extra.leverage!=='number'||!Number.isInteger(extra.leverage)||extra.leverage<1||extra.leverage>125))
+      throw new Failure('INVALID_DEMO_LEVERAGE');
+    action={...action,...(typeof extra.leverage==='number'?{leverage:extra.leverage}:{}),strategyVersion:extra.strategyVersion as string|undefined??'2.3',triggerType:extra.triggerType as string|undefined??'MARK_PRICE'};
   }
   const payload=JSON.stringify(action);
   await db.prepare("INSERT OR IGNORE INTO binance_demo_actions(id,payload,state,created_at) VALUES(?,?,'queued',?)")

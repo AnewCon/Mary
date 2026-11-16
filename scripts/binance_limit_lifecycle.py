@@ -59,6 +59,8 @@ class Lifecycle:
             return self.poll(file)
         action = job["action"]
         job["result"] = self.initial(action)
+        if job.get("confirmedLeverage") is not None:
+            job["result"]["confirmedLeverage"] = job["confirmedLeverage"]
         job["submittedAt"] = time.time()
         save(file, job)  # Persist intent before the first submission; never resubmit it.
         try:

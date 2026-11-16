@@ -1,6 +1,8 @@
 """Read-only market data relay. The only public routes are fixed provider reads."""
 import hmac
 from concurrent.futures import ThreadPoolExecutor
+from threading import Thread, Lock
+from oi_collector import run_collector, bounded
 import json
 from pathlib import Path
 import re
@@ -48,7 +50,7 @@ def allowed(provider, target):
 CLOUD='https://marya-4j3.pages.dev/api/market-agent/'
 
 
-def fetch_provider(provider,target):
+def provider_request(provider,target):
     if not allowed(provider,target):
         return 400,b'{"error":"INVALID_MARKET_ROUTE"}'
     headers={'Accept':'application/json','User-Agent':'QuantOS-Market/1.0'}
@@ -65,6 +67,32 @@ def fetch_provider(provider,target):
         return 502,b'{"error":"PROVIDER_UNREACHABLE"}'
 
 
+budget_lock=Lock()
+budget_day=None
+counts={}
+daily_budget=bounded('QUANTOS_MARKET_DAILY_REQUESTS',3500,500,10000)
+
+
+def fetch_provider(provider,target):
+    global budget_day
+    day=int(time.time())//86400
+    with budget_lock:
+        if budget_day!=day:
+            if counts: print('market UTC daily metrics',json.dumps(counts),flush=True)
+            counts.clear()
+            budget_day=day
+        if sum(entry['requests'] for entry in counts.values())>=daily_budget:
+            return 429,b'{"error":"DAILY_MARKET_BUDGET_EXHAUSTED"}'
+        entry=counts.setdefault(provider,dict(requests=0,errors=0,request_target_bytes=0,response_payload_bytes=0))
+        entry['requests']+=1
+        entry['request_target_bytes']+=len(target.encode())
+    status,body=provider_request(provider,target)
+    with budget_lock:
+        entry['errors']+=int(status!=200)
+        entry['response_payload_bytes']+=len(body)
+    return status,body
+
+
 def cloud(path,body,headers=None,timeout=25):
     return opener.open(Request(CLOUD+path,data=body,method='POST',
         headers={'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json','User-Agent':'QuantOS-VPS/1.0',**(headers or {})}),timeout=timeout)
@@ -73,6 +101,8 @@ def cloud(path,body,headers=None,timeout=25):
 def work(job):
     try:
         status,body=fetch_provider(job['provider'],job['target'])
+        if status in {502,503,504}:
+            status,body=fetch_provider(job['provider'],job['target'])
         with cloud('result',body,{'X-QuantOS-Market-Id':job['id'],'X-QuantOS-Market-Status':str(status)},timeout=6):
             pass
     except Exception as error:
@@ -82,6 +112,7 @@ def work(job):
 def main():
     if len(TOKEN)<40:
         raise ValueError('Missing market relay token')
+    Thread(target=run_collector,args=(fetch_provider,cloud),daemon=True,name='oi-collector').start()
     with ThreadPoolExecutor(max_workers=6) as pool:
         from threading import BoundedSemaphore
         capacity=BoundedSemaphore(6)

@@ -1,3 +1,5 @@
+import { analyzeMarket } from './market-analyze';
+import { ingestOI, pruneOI } from './oi-history';
 export { MarketRelay } from './market-relay';
 import { marketReference } from './market-reference';
 import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest, submitLocalLiveAction, readLocalLiveAccount } from './binance-live-local';
@@ -11,7 +13,7 @@ import {hash,randomKey,scopeAllowed} from './security';
 import {okx,Failure} from './exchange';
 import {quote,close,reconcile} from './trading';
 import {performance,history,syncPerformance,resetTodayEarnings} from './performance';
-interface Env extends BinanceDemoEnv {MARKET_VPS_TOKEN?:string;MARKET_RELAY:DurableObjectNamespace;BINANCE_LIVE_DESKTOP_TOKEN?:string;DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
+interface Env extends BinanceDemoEnv {MARKET_VPS_TOKEN?:string;OI_INTERVAL_MINUTES?:string;OI_RETENTION_DAYS?:string;MARKET_SIGNAL_CONFIG?:string;MARKET_CACHE_TTLS?:string;MARKET_RELAY:DurableObjectNamespace;BINANCE_LIVE_DESKTOP_TOKEN?:string;DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
 async function body(r:Request){const text=await r.text();if(new TextEncoder().encode(text).length>16384)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
@@ -20,10 +22,16 @@ async function auth(r:Request,e:Env,scope='read',sessionOnly=false){const cookie
 async function sync(e:Env){const lease=await e.DB.prepare("INSERT INTO system_settings(key,value) VALUES('sync_lock',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(value AS INTEGER)<? RETURNING value").bind(String(Date.now()),Date.now()-30000).first();if(!lease)throw new Failure('SYNC_IN_PROGRESS',409);try{const [balances,positions]=await Promise.all([okx(e,'/api/v5/account/balance'),okx(e,'/api/v5/account/positions?instType=SWAP')]);const a=balances[0];const data={account:{equity:a.totalEq,currency:'USD',details:a.details,source:'OKX API'},positions:positions.filter((p:any)=>Number(p.pos)!==0),updatedAt:now()};await e.DB.batch([e.DB.prepare('INSERT OR REPLACE INTO account_snapshots VALUES(1,?,?)').bind(JSON.stringify(data),data.updatedAt),e.DB.prepare('DELETE FROM positions'),...data.positions.map((p:any)=>e.DB.prepare('INSERT INTO positions VALUES(?,?)').bind(p.posId,JSON.stringify(p))),e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,NULL)').bind(now())]);return data}catch(err){const code=err instanceof Failure?err.code:'SYNC_NETWORK_FAILURE';await e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,?)').bind(now(),code).run();throw new Failure(code,503)}finally{await e.DB.prepare("DELETE FROM system_settings WHERE key='sync_lock'").run()}}
 async function route(r:Request,e:Env,c:ExecutionContext){const u=new URL(r.url),p=u.pathname,m=r.method;if(!p.startsWith('/api/'))return e.ASSETS.fetch(r);if(!['GET','POST'].includes(m))throw new Failure('METHOD_NOT_ALLOWED',405);if(m==='POST'&&r.headers.get('Origin')&&r.headers.get('Origin')!==u.origin)throw new Failure('ORIGIN_DENIED',403);
 if(p==='/api/login'&&m==='POST'){await limit(e,'login:'+r.headers.get('CF-Connecting-IP'),5);const b=await body(r);if(!e.ADMIN_PASSWORD||!e.SESSION_SECRET)throw new Failure('ADMIN_NOT_CONFIGURED',503);if(typeof b.password!=='string'||await hash(b.password)!==await hash(e.ADMIN_PASSWORD))throw new Failure('INVALID_LOGIN',401);const token=randomKey();await e.DB.prepare('INSERT INTO sessions VALUES(?,?)').bind(await hash(token),Date.now()+8*3600000).run();const out=json({authenticated:true});out.headers.set('Set-Cookie',`quantos=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return out}
-if(m==='POST'&&(p==='/api/market-agent/poll'||p==='/api/market-agent/result')){
+const bounded = (value:string|undefined,fallback:number,min:number,max:number) => {
+  const number=Number(value);
+  return Number.isInteger(number)&&number>=min&&number<=max?number:fallback;
+};
+const oiInterval=bounded(e.OI_INTERVAL_MINUTES,15,5,60);
+if(m==='POST'&&(p==='/api/market-agent/poll'||p==='/api/market-agent/result'||p==='/api/market-agent/oi')){
   const token=e.MARKET_VPS_TOKEN;
   if(!token||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+token))
     throw new Failure('UNAUTHORIZED',401);
+  if(p.endsWith('/oi'))return json(await ingestOI(e.DB,await body(r),oiInterval));
   const broker=e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay'));
   const path=p.endsWith('/poll')?'/poll':'/result';
   if(path==='/poll')return broker.fetch('https://market-relay.internal/poll');
@@ -34,9 +42,14 @@ if(m==='POST'&&(p==='/api/market-agent/poll'||p==='/api/market-agent/result')){
     'X-QuantOS-Market-Status':r.headers.get('X-QuantOS-Market-Status')||''
   },body:r.body});
 }
+if(p==='/api/market/analyze'&&m==='POST'){
+  const principal=await auth(r,e,'read');
+  await limit(e,'market-analysis:'+principal,16);
+  return json(await analyzeMarket(e.DB,await body(r),c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay')),oiInterval,e.MARKET_SIGNAL_CONFIG,e.MARKET_CACHE_TTLS));
+}
 if(p.startsWith('/api/market/')&&m==='GET'){
   await auth(r,e,'read');
-  return json(await marketReference(u,c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay'))));
+  return json(await marketReference(u,c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay')),e.MARKET_CACHE_TTLS));
 }
 if(p==='/api/paper/capabilities'&&m==='GET'){await auth(r,e,'write');return json({enabled:true})}
 if(p==='/api/paper/reviews'&&m==='GET'){await auth(r,e,'read');return json(await listPaperReviews(e.DB))}
@@ -151,4 +164,10 @@ if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
 export default {async fetch(r:Request,e:Env,c:ExecutionContext){try{return await route(r,e,c)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){
+if(new Date(_c.scheduledTime).getUTCHours()===3&&new Date(_c.scheduledTime).getUTCMinutes()===17){
+  const requested=Number(e.OI_RETENTION_DAYS);
+  const days=Number.isInteger(requested)&&requested>=1&&requested<=365?requested:90;
+  ctx.waitUntil(pruneOI(e.DB,days).catch(error=>console.log('oi retention',String(error))));
+}
+
 ctx.waitUntil((async()=>{try{await sync(e)}catch{}try{await syncPerformance(e)}catch{}if(new Date(_c.scheduledTime).getUTCMinutes()===0)await e.DB.batch([e.DB.prepare('DELETE FROM sync_logs WHERE id < (SELECT id FROM sync_logs ORDER BY id DESC LIMIT 1 OFFSET 1439)'),e.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(Date.now()),e.DB.prepare('DELETE FROM rate_limits WHERE bucket<?').bind(Math.floor(Date.now()/60000)-10)])})())}};

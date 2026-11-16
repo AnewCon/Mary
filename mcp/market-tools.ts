@@ -6,6 +6,7 @@ const make=(name:string,description:string,properties:Record<string,unknown>,req
 });
 
 export const marketTools=[
+  make('quantos_market_analyze','按需综合市场数据，区分观测、估算、计算与推断。部分来源异常时仍返回可用部分。实验策略只输出分析；如需评分，请提供已收盘、按时间升序的 Binance K 线和主动买入成交占比。',{symbol:coin,include:{type:'array',minItems:1,maxItems:4,uniqueItems:true,items:{type:'string',enum:['derivatives','oi_history','liquidation_heatmap','recent_liquidations']}},candles:{type:'object',description:'可选。15m、1h、4h 各 8–24 根已收盘 K 线。每项为 {time,open,high,low,close,volume}，字段均为数字，time 是开盘 UTC 毫秒。'},flow:{type:'object',description:'可选。{ratio,asOf,source}，ratio 为 0 到 1 的主动买入成交占比，asOf 为 UTC 毫秒。'}},['symbol']),
   make('quantos_market_liquidation_heatmap','读取 Blockmetric 的潜在清算热力图摘要。返回最新快照的多空重点价位和近期时段摘要，默认覆盖 Hyperliquid 的可追踪仓位。金额为估算值，不能当作已经爆仓。',{symbol:coin,limit:limit(12)},['symbol']),
   make('quantos_market_recent_liquidations','读取 MarginPad 已发生的近期爆仓事件。结果受覆盖和条数限制，不能视为全市场总额。',{symbol:coin,limit:limit(50)},['symbol']),
   make('quantos_market_overview','读取 CoinGecko 按市值排名的全市场行情。可按市值定面积、24 小时涨跌定颜色构造涨跌热力图。',{limit:limit(50)},[]),

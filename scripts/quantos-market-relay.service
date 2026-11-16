@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/quantos-market-relay/config.env
 ExecStart=/usr/bin/python3 /opt/quantos-market-relay/relay.py
 Restart=on-failure
 RestartSec=3

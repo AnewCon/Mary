@@ -8,7 +8,7 @@ type Order = {
   result: null | {
     orderState?: string; exchangeStatus?: string; exchangeOrderId?: string; createdAt?: number; expiresAt?: number;
     executedQuantity?: string; averagePrice?: string; cancelResult?: string; protection?: { stopLoss?: Leg; takeProfit?: Leg };
-    triggerType?: string; riskBlocked?: boolean; code?: string; errors?: {time: number; step: string; code: string}[];
+    triggerType?: string; confirmedLeverage?: number; riskBlocked?: boolean; code?: string; errors?: {time: number; step: string; code: string}[];
   };
 };
 const format = (time: number) => new Date(time).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'});
@@ -33,7 +33,7 @@ function OrderList({api}: {api:(path:string)=>Promise<Order[]>}) {
     return ()=>{active=false;window.clearInterval(refresh);window.clearInterval(clock);};
   },[api]);
   return <div className="exchange-body">
-    <p>限价入场验收期间暂停新挂单。已有订单继续跟踪。</p>
+    <p>模拟限价入场须在 Chat 中确认。VPS 跟踪订单、撤单和成交保护。</p>
     {error && <p role="alert">暂时无法读取订单状态。</p>}
     {!orders?.length && <p>{orders ? '暂无限价订单。' : '正在读取订单。'}</p>}
     {orders?.map(order=>{
@@ -49,6 +49,7 @@ function OrderList({api}: {api:(path:string)=>Promise<Order[]>}) {
           <div><dt>委托 / 成交数量</dt><dd>{order.action.quantity} / {data?.executedQuantity ?? '—'}</dd></div>
           <div><dt>实际成交均价</dt><dd>{data?.executedQuantity && Number(data.executedQuantity)>0 ? data.averagePrice : '—'}</dd></div>
           <div><dt>撤单确认</dt><dd>{data?.cancelResult ?? '—'}</dd></div>
+          <div><dt>已确认杠杆</dt><dd>{data?.confirmedLeverage ? data.confirmedLeverage+'×' : '—'}</dd></div>
           <div><dt>策略版本</dt><dd>{order.action.strategyVersion ?? '旧版'}</dd></div>
           <div><dt>止损</dt><dd>{leg(data?.protection?.stopLoss)}</dd></div>
           <div><dt>止盈</dt><dd>{leg(data?.protection?.takeProfit)}</dd></div>

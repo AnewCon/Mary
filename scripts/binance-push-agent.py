@@ -191,6 +191,15 @@ def bracket_entry(job):
         raise Upstream('BRACKET_REQUIRES_FLAT_SYMBOL')
     if exchange('/fapi/v1/openOrders',params={'symbol':symbol}) or exchange('/fapi/v1/openAlgoOrders',params={'symbol':symbol}):
         raise Upstream('BRACKET_REQUIRES_NO_OPEN_ORDERS')
+    # Leave leverage alone unless the same confirmed request includes it.
+    leverage=action.get('leverage')
+    if leverage is not None:
+        changed=exchange('/fapi/v1/leverage','POST',{'symbol':symbol,'leverage':leverage})
+        config=exchange('/fapi/v1/symbolConfig',params={'symbol':symbol})
+        current=next((row for row in config if row.get('symbol')==symbol),None)
+        if changed.get('leverage')!=leverage or not current or int(current.get('leverage',0))!=leverage:
+            raise Upstream('DEMO_LEVERAGE_NOT_CONFIRMED')
+        job['confirmedLeverage']=leverage
     return manager.begin(job,execute)
 
 
@@ -198,7 +207,7 @@ def process(job):
     result={'id':job['id']}
     try: result.update(state='acknowledged',result=bracket_entry(job) if job['action']['kind']=='bracket' else execute(job))
     except Upstream as e:
-        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'DEMO_LIMIT_VALIDATION_GATE','DEMO_LIMIT_REQUIRES_BRACKET','DEMO_PROTECTION_RISK_BLOCK','POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
+        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'DEMO_LIMIT_VALIDATION_GATE','DEMO_LEVERAGE_NOT_CONFIRMED','DEMO_LIMIT_REQUIRES_BRACKET','DEMO_PROTECTION_RISK_BLOCK','POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
         result.update(state='rejected' if certain else 'unknown',result={'code':str(e.code)})
     except Exception: result.update(state='unknown',result={'code':'VERIFY_BINANCE_BEFORE_RETRY'})
     tmp=spool.with_suffix('.tmp')
