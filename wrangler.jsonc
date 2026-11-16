@@ -27,5 +27,21 @@
     "TRADING_MODE": "simulation",
     "DEMO_TRADING_ENABLED": "true",
     "MCP_DEMO_TRADING_ENABLED": "true"
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MARKET_RELAY",
+        "class_name": "MarketRelay"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "market-relay-v1",
+      "new_sqlite_classes": [
+        "MarketRelay"
+      ]
+    }
+  ]
 }
