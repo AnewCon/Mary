@@ -42,7 +42,18 @@ export async function publishDemoSnapshot(env: BinanceDemoEnv, input: any, live 
 }
 
 export async function enqueueDemo(db: D1Database, input: unknown) {
-  const {id,action}=decode(input);
+  const decoded=decode(input);
+  const {id}=decoded;
+  const extra=input as {strategyVersion?:unknown;triggerType?:unknown};
+  let action:typeof decoded.action & {strategyVersion?:string;triggerType?:string}=decoded.action;
+  if(action.kind==='limit')throw new Failure('DEMO_LIMIT_REQUIRES_BRACKET',409);
+  if(action.kind==='bracket'){
+    if(extra.triggerType!==undefined&&extra.triggerType!=='MARK_PRICE'&&extra.triggerType!=='CONTRACT_PRICE')
+      throw new Failure('INVALID_DEMO_TRIGGER');
+    if(extra.strategyVersion!==undefined&&(typeof extra.strategyVersion!=='string'||!/^[A-Za-z0-9._-]{1,40}$/.test(extra.strategyVersion)))
+      throw new Failure('INVALID_STRATEGY_VERSION');
+    action={...action,strategyVersion:extra.strategyVersion as string|undefined??'2.3',triggerType:extra.triggerType as string|undefined??'MARK_PRICE'};
+  }
   const payload=JSON.stringify(action);
   await db.prepare("INSERT OR IGNORE INTO binance_demo_actions(id,payload,state,created_at) VALUES(?,?,'queued',?)")
     .bind(id,payload,now()).run();
@@ -57,6 +68,22 @@ export async function enqueueDemoRefresh(db: D1Database) {
   await db.prepare("INSERT INTO binance_demo_actions(id,payload,state,created_at) VALUES(?,?,'queued',?)")
     .bind(id, JSON.stringify({kind:'refresh_snapshot'}), now()).run();
   return {id};
+}
+
+export async function legacyDemoLimits(db:D1Database) {
+  const records=await db.prepare(`SELECT id,payload FROM binance_demo_actions
+    WHERE json_extract(payload,'$.kind')='limit' AND json_extract(result,'$.orderState') IS NULL
+      AND json_extract(result,'$.exchangeStatus') IN ('NEW','PARTIALLY_FILLED')`).all<{id:string;payload:string}>();
+  return records.results.map(row=>({id:row.id,action:JSON.parse(row.payload)}));
+}
+
+export async function listDemoLimits(db:D1Database) {
+  const records=await db.prepare(`SELECT id,payload,state,result,created_at FROM binance_demo_actions
+    WHERE json_extract(payload,'$.kind') IN ('bracket','limit') ORDER BY created_at DESC LIMIT 40`).all<{
+      id:string;payload:string;state:string;result:string|null;created_at:string
+    }>();
+  return records.results.map(row=>({id:row.id,action:JSON.parse(row.payload),state:row.state,
+    submittedAt:row.created_at,result:row.result?JSON.parse(row.result):null}));
 }
 
 export async function queuedDemoStatus(db:D1Database,id:unknown) {
@@ -84,8 +111,9 @@ export async function reportDemo(db:D1Database,input:any) {
     !['acknowledged','rejected','unknown'].includes(input.state)||!input.result||
     typeof input.result!=='object'||Array.isArray(input.result)) throw new Failure('INVALID_BINANCE_RESULT');
   const result=JSON.stringify(input.result);
-  const changed=await db.prepare("UPDATE binance_demo_actions SET state=?,result=? WHERE id=? AND (state='running' OR state='acknowledged' AND json_extract(payload,'$.kind')='bracket' AND json_extract(result,'$.protectionState') IN ('waiting_fill','armed','watching','protection_error'))")
-    .bind(input.state,result,input.id).run();
+  const changed=await db.prepare(`UPDATE binance_demo_actions SET state=?,result=? WHERE id=? AND (state='running' OR state IN ('acknowledged','unknown') AND json_extract(payload,'$.kind') IN ('bracket','limit')
+      AND json_extract(?,'$.orderState') IN ('PENDING','NEW','PARTIALLY_FILLED','FILLED','CANCEL_PENDING','CANCELED','EXPIRED','ERROR'))`)
+    .bind(input.state,result,input.id,result).run();
   if(changed.meta.changes!==1){
     const old=await db.prepare('SELECT state,result FROM binance_demo_actions WHERE id=?').bind(input.id)
       .first<{state:string;result:string}>();

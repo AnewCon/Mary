@@ -1,3 +1,4 @@
+import BinanceLimitOrders from './BinanceLimitOrders';
 import { BinanceReturns, type BinanceLedger } from './BinanceReturns';
 import FoldPanel from './FoldPanel';
 import { useEffect, useState } from 'react';
@@ -138,6 +139,7 @@ export default function BinanceDemoDashboard({ api, view = 'all' }: {
       </table></div> : <div className="empty">{snapshot ? (data?.stale ? '上次同步时没有持仓，请立即同步确认。' : '当前没有持仓') : '等待账户数据'}</div>}
     </div>}
     {view !== 'earnings' && <BinanceReturns ledger={snapshot?.ledger} view="positions" waiting="等待 VPS 同步平仓记录"/>}
+    {view !== 'earnings' && data?.configured && <BinanceLimitOrders api={api}/>}
     {view === 'all' && data?.configured && data.tradingEnabled && <FoldPanel title="模拟盘交易"><BinanceDemoTradeForm api={api} positions={snapshot?.positions ?? []}
       onApplied={() => void refresh()} /></FoldPanel>}
   </>;

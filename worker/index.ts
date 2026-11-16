@@ -1,5 +1,5 @@
 import { localLiveStatus, localLiveAgent, submitLocalLive, readLocalLiveRequest, submitLocalLiveAction, readLocalLiveAccount } from './binance-live-local';
-import { publishDemoSnapshot, enqueueDemo, enqueueDemoRefresh, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
+import { publishDemoSnapshot, enqueueDemo, enqueueDemoRefresh, listDemoLimits, legacyDemoLimits, queuedDemoStatus, claimDemo, reportDemo } from './binance-demo-queue';
 import { readBinanceDemo, type BinanceDemoEnv } from './binance-demo';
 import { listPaperReviews, savePaperReview } from './paper-reviews';
 import { paperOrders, writePaperOrder } from './paper-orders';
@@ -62,6 +62,7 @@ if(p.startsWith('/api/binance-demo/')){
     if(!secret||await hash(r.headers.get('Authorization')||'')!==await hash('Bearer '+secret))throw new Failure('UNAUTHORIZED',401);
     if(p.endsWith('/sync-mode'))return json({mode:await e.DB.prepare("SELECT value FROM system_settings WHERE key='binance_demo_sync_mode'").first<string>('value')||'on_open'});
     if(p.endsWith('/snapshot'))return json(await publishDemoSnapshot(e,await body(r)));
+    if(p.endsWith('/legacy-limits'))return json(await legacyDemoLimits(e.DB));
     if(p.endsWith('/claim'))return json(await claimDemo(e.DB,e.MCP_DEMO_TRADING_ENABLED==='true'));
     if(p.endsWith('/result'))return json(await reportDemo(e.DB,await body(r)));
     throw new Failure('NOT_FOUND',404);
@@ -80,6 +81,7 @@ if(p.startsWith('/api/binance-demo/')){
   if(p.endsWith('/account')&&m==='GET')return json(await readBinanceDemo(binance));
   if(p.endsWith('/sync')&&m==='POST'){await limit(e,'binance-demo-sync',4);return json(await enqueueDemoRefresh(e.DB))}
   if(query){const input=await body(r);if(!['orders','contract','query'].includes(input?.kind))throw new Failure('INVALID_DEMO_QUERY');await limit(e,'binance-demo-query',15);return json(await enqueueDemo(e.DB,input))}
+  if(p.endsWith('/limits')&&m==='GET')return json(await listDemoLimits(e.DB));
   if(p.endsWith('/action')&&m==='GET')return json(await queuedDemoStatus(e.DB,u.searchParams.get('id')));
   if(tradingEnabled&&write){await limit(e,'binance-demo-action',8);return json(await enqueueDemo(e.DB,await body(r)))}
   throw new Failure('NOT_FOUND',404);

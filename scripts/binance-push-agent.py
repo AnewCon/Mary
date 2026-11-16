@@ -2,6 +2,7 @@ import hashlib,hmac,json,time,urllib.request,urllib.error,urllib.parse,os
 from decimal import Decimal
 from pathlib import Path
 from binance_history import account_history
+from binance_limit_lifecycle import Lifecycle
 
 config=json.load(open('/etc/quantos-binance/config.json'))
 cf='https://marya-4j3.pages.dev/api/binance-demo/agent/'
@@ -91,6 +92,10 @@ def execute(job):
     kind=action['kind']
     symbol=action['symbol']
 
+    if kind=='limit' and not job.get('bracketEntry'):
+        raise Upstream('DEMO_LIMIT_REQUIRES_BRACKET')
+    if kind=='open' and lifecycle().blocked():
+        raise Upstream('DEMO_PROTECTION_RISK_BLOCK')
     if kind in {'open','limit','protect'} and any(
         json.loads(file.read_text())['action']['symbol']==symbol
         for file in (spool.parent/'brackets').glob('*.json')
@@ -166,88 +171,34 @@ def atomic_json(path,data):
     tmp.write_text(json.dumps(data))
     os.replace(tmp,path)
 
+def lifecycle():
+    return Lifecycle(spool.parent/'brackets',exchange,order_context,
+                     lambda id,result: cloud('result',{'id':id,'state':'acknowledged','result':result}),Upstream)
+
+
 def bracket_entry(job):
+    if os.getenv('QUANTOS_DEMO_LIMIT_ENABLED')!='true':
+        raise Upstream('DEMO_LIMIT_VALIDATION_GATE')
     action=job['action']
     symbol=action['symbol']
-    folder=spool.parent/'brackets'
-    folder.mkdir(exist_ok=True)
-    if any(json.loads(p.read_text())['action']['symbol']==symbol for p in folder.glob('*.json')):
+    manager=lifecycle()
+    if manager.blocked():
+        raise Upstream('DEMO_PROTECTION_RISK_BLOCK')
+    if any(json.loads(file.read_text())['action']['symbol']==symbol for file in manager.files()):
         raise Upstream('BRACKET_ALREADY_ACTIVE')
-    if any(Decimal(p['positionAmt'])!=0 for p in exchange('/fapi/v3/positionRisk',params={'symbol':symbol})):
+    _,_,_,active=order_context(symbol,action['side'])
+    if active:
         raise Upstream('BRACKET_REQUIRES_FLAT_SYMBOL')
     if exchange('/fapi/v1/openOrders',params={'symbol':symbol}) or exchange('/fapi/v1/openAlgoOrders',params={'symbol':symbol}):
         raise Upstream('BRACKET_REQUIRES_NO_OPEN_ORDERS')
-    file=folder/(job['id']+'.json')
-    atomic_json(file,job)
-    result=execute({'id':job['id'],'bracketEntry':True,'action':{**action,'kind':'limit'}})
-    return {**result,'protectionState':'waiting_fill'}
-
-def report_bracket(file,job,result):
-    if job.get('lastReport')!=result:
-        cloud('result',{'id':job['id'],'state':'acknowledged','result':result})
-        job['lastReport']=result
-        atomic_json(file,job)
-
-
-def monitor_bracket(file):
-    job=json.loads(file.read_text())
-    action=job['action']
-    symbol=action['symbol']
-    try:
-        order=exchange('/fapi/v1/order',params={'symbol':symbol,'origClientOrderId':'qos_'+job['id']})
-    except Upstream as e:
-        if e.code!=-2013: raise
-        if time.time()-file.stat().st_mtime<180: return
-        file.unlink()
-        return
-    result={'exchangeOrderId':str(order['orderId']),'exchangeStatus':order['status'],'executedQuantity':order['executedQty']}
-    if not Decimal(order['executedQty']):
-        if order['status'] not in {'CANCELED','EXPIRED','REJECTED','EXPIRED_IN_MATCH'}: return
-        result['protectionState']='entry_canceled'
-    else:
-        try:
-            _,pos_side,position,_=order_context(symbol,action['side'])
-            if order.get('positionSide')!=pos_side:
-                raise Upstream('BRACKET_POSITION_MODE_MISMATCH')
-        except Upstream as error:
-            if error.code not in {'POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','BRACKET_POSITION_MODE_MISMATCH'}:
-                raise
-            result.update(protectionState='protection_error',code=error.code)
-            report_bracket(file,job,result)
-            return
-        opposite='SELL' if action['side']=='LONG' else 'BUY'
-        active=position is not None
-        legs={}
-        for key,kind,suffix in [('stopLoss','STOP_MARKET','s'),('takeProfit','TAKE_PROFIT_MARKET','t')]:
-            leg_id='qb'+job['id']+suffix
-            try:
-                current=exchange('/fapi/v1/algoOrder',params={'clientAlgoId':leg_id})
-            except Upstream as e:
-                if e.code not in {-2011,-2013}: raise
-                current=None
-            if active and current is None:
-                try: current=exchange('/fapi/v1/algoOrder','POST',{'algoType':'CONDITIONAL','symbol':symbol,
-                    'side':opposite,'positionSide':pos_side,'type':kind,'workingType':'MARK_PRICE',
-                    'closePosition':'true','triggerPrice':action[key],'clientAlgoId':leg_id})
-                except Upstream as e:
-                    legs[key]={'status':'ERROR','code':str(e.code)}
-            if current:
-                if not active and current.get('algoStatus')=='NEW':
-                    current=exchange('/fapi/v1/algoOrder','DELETE',{'algoId':current['algoId']})
-                legs[key]={'algoId':str(current['algoId']),'status':current.get('algoStatus')}
-        armed=all(legs.get(k,{}).get('status')=='NEW' for k in ('stopLoss','takeProfit'))
-        result.update(protectionState=('armed' if armed else 'protection_error') if active else 'completed',protection=legs)
-        if not active and order['status'] in {'NEW','PARTIALLY_FILLED'}:
-            exchange('/fapi/v1/order','DELETE',{'symbol':symbol,'orderId':order['orderId']})
-    report_bracket(file,job,result)
-    if result['protectionState'] in {'completed','entry_canceled'}: file.unlink()
+    return manager.begin(job,execute)
 
 
 def process(job):
     result={'id':job['id']}
     try: result.update(state='acknowledged',result=bracket_entry(job) if job['action']['kind']=='bracket' else execute(job))
     except Upstream as e:
-        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
+        certain=(isinstance(e.code,int) and e.code not in {-1000,-1001,-1006,-1007}) or e.code in {'DEMO_LIMIT_VALIDATION_GATE','DEMO_LIMIT_REQUIRES_BRACKET','DEMO_PROTECTION_RISK_BLOCK','POSITION_CHANGED','POSITION_MODE_UNAVAILABLE','POSITION_MODE_MISMATCH','QUANTITY_TOO_SMALL','OPPOSITE_POSITION','INVALID_ACTION','CONTRACT_NOT_FOUND','ORDER_SYMBOL_MISMATCH','PROTECTION_ALREADY_EXISTS','BRACKET_ALREADY_ACTIVE','BRACKET_REQUIRES_FLAT_SYMBOL','BRACKET_REQUIRES_NO_OPEN_ORDERS'}
         result.update(state='rejected' if certain else 'unknown',result={'code':str(e.code)})
     except Exception: result.update(state='unknown',result={'code':'VERIFY_BINANCE_BEFORE_RETRY'})
     tmp=spool.with_suffix('.tmp')
@@ -260,6 +211,7 @@ def main():
     config_due=0
     history_due=0
     bracket_due=0
+    recover_legacy=True
     live_due=0
     mode='paused'
     marker=spool.with_name('sync-active')
@@ -274,6 +226,12 @@ def main():
                 next_mode=cloud('sync-mode',{})['mode']
                 if next_mode!=mode: due=0
                 mode=next_mode
+                if recover_legacy:
+                    manager=lifecycle()
+                    for job in cloud('legacy-limits',{}):
+                        file=manager.folder/(job['id']+'.json')
+                        if not file.exists(): atomic_json(file,job)
+                    recover_legacy=False
             except Exception as e:
                 print('sync configuration failed',getattr(e,'code',type(e).__name__),flush=True)
             config_due=current+60
@@ -289,6 +247,18 @@ def main():
             except Exception as e:
                 print('snapshot failed',getattr(e,'code',type(e).__name__),flush=True)
             due=time.monotonic()+60
+        if time.monotonic()>=bracket_due:
+            bracket_due=time.monotonic()+5
+            manager=lifecycle()
+            unsent=json.loads(spool.read_text()).get('id') if spool.exists() else None
+            for file in manager.files():
+                if file.stem==unsent:
+                    try: manager.poll(file,publish=False)
+                    except Exception as e: print('limit lifecycle check failed',file.stem,type(e).__name__,flush=True)
+                    continue
+                try: manager.poll(file)
+                except Exception as e:
+                    print('limit lifecycle check failed',file.stem,getattr(e,'code',type(e).__name__),flush=True)
         try:
             if spool.exists():
                 cloud('result',json.loads(spool.read_text()))
@@ -320,12 +290,6 @@ def main():
                         process(job)
         except Exception as e:
             print('queue operation failed',getattr(e,'code',type(e).__name__),flush=True)
-        if time.monotonic()>=bracket_due and not spool.exists():
-            bracket_due=time.monotonic()+15
-            for file in (spool.parent/'brackets').glob('*.json'):
-                try: monitor_bracket(file)
-                except Exception as e:
-                    print('bracket check failed',file.stem,getattr(e,'code',type(e).__name__),flush=True)
         time.sleep(5)
 
 if __name__=='__main__': main()
