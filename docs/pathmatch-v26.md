@@ -54,3 +54,5 @@ D1 迁移 `0010_pathmatch.sql` 保存不可覆盖的草稿、锁定时间、ATR�
 本版为 SHADOW。符合路径的计划提示独立执行风控待复核。DEMO_AUTO、历史重放与阈值样本外对照尚待验收，现有 Binance Demo 订单生命周期未改动。100 个独立样本需要随时间采集。
 
 先执行 D1 迁移，再更新 VPS 行情中继、Worker、MCP 和 Pages。回滚 Worker 后预测自然观测暂停，D1 保留所有记录；VPS 可恢复 `relay.py.before-pathmatch` 并重启行情服务。旧版模拟订单由原服务继续管理。
+
+管理员可在预测详情删除记录。迁移 `0011_pathmatch_deleted_at.sql` 新增删除时间，列表与状态查询隐藏已删除记录，正在观测的记录停止更新，预测原文及已有结果继续保存在 D1。

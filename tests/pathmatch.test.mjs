@@ -45,12 +45,14 @@ test('ATR uses fourteen true ranges and requires continuous closed samples',()=>
  assert.throws(()=>atr14(rows),/ATR_GAP/);
 });
 const {outputFiles:[storeBundle]}=await build({entryPoints:['worker/pathmatch-store.ts'],bundle:true,format:'esm',platform:'node',write:false});
-const {createPrediction,armPrediction,monitorPredictions,cancelPrediction,predictionStatus}=await import('data:text/javascript;base64,'+Buffer.from(storeBundle.text).toString('base64'));
+const {createPrediction,armPrediction,monitorPredictions,cancelPrediction,predictionStatus,deletePrediction,predictionHistory}=await import('data:text/javascript;base64,'+Buffer.from(storeBundle.text).toString('base64'));
 const {DatabaseSync}=await import('node:sqlite');
 const {readFileSync}=await import('node:fs');
 function db(){
  const sqlite=new DatabaseSync(':memory:');
- sqlite.exec(readFileSync('migrations/0010_pathmatch.sql','utf8'));
+ for(const migration of ['0010_pathmatch.sql','0011_pathmatch_deleted_at.sql']){
+  sqlite.exec(readFileSync('migrations/'+migration,'utf8'));
+ }
  return {prepare(sql){return {all:()=>({results:sqlite.prepare(sql).all()}),bind(...args){return {
   first:()=>sqlite.prepare(sql).get(...args)??null,
   all:()=>({results:sqlite.prepare(sql).all(...args)}),
@@ -130,4 +132,31 @@ test('D1 survives worker restart, symbol gets one upstream query, expiry cannot 
  const result=await predictionStatus(database,ids[0]);
  assert.equal(result.state,'COMPLETED');
  assert.equal(result.execution,'DISABLED_PENDING_INDEPENDENT_ACCEPTANCE');
+});
+
+test('deletion hides a prediction, stops observation and preserves its audit data',async(t)=>{
+ const now=start-10000;
+ t.mock.method(Date,'now',()=>now);
+ const database=db(),id='d'.repeat(32),other='e'.repeat(32),input={id,plan:fullPlan};
+ await createPrediction(database,input);
+ await createPrediction(database,{...input,id:other});
+ await armPrediction(database,relay(now),{id,mode:'SHADOW',confirm:true});
+ await monitorPredictions(database,relay(start+2*M),start+2*M);
+ const sql=database.prepare('SELECT * FROM pathmatch_predictions WHERE id=?').bind(id);
+ const original=sql.first();
+ const deleting=relay(start+3*M,()=>deletePrediction(database,{id,confirm:true}));
+ await monitorPredictions(database,deleting,start+3*M);
+ const saved=sql.first();
+ assert.equal(saved.state,'CANCELED');
+ assert.equal(saved.payload,original.payload);
+ assert.equal(saved.result,original.result);
+ assert.equal(saved.deleted_at,now);
+ assert.deepEqual(await deletePrediction(database,{id,confirm:true}),{id,deletedAt:now});
+ assert.deepEqual((await predictionHistory(database,new URLSearchParams())).map(x=>x.id),[other]);
+ await assert.rejects(predictionStatus(database,id),/PATHMATCH_NOT_FOUND/);
+ await assert.rejects(createPrediction(database,input),/PATHMATCH_ID_RETIRED/);
+ await assert.rejects(deletePrediction(database,{id:other}),/PATHMATCH_CONFIRMATION_REQUIRED/);
+ let calls=0;
+ await monitorPredictions(database,relay(start+4*M,()=>calls++),start+4*M);
+ assert.equal(calls,0);
 });

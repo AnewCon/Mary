@@ -2,7 +2,7 @@ import { Failure } from './exchange';
 import { atr14, match, minute, parsePlan, type Candle, type Plan } from './pathmatch-core';
 
 type Slot={id:string;payload:string;symbol:string;state:string;version:string;created_at:number;expires_at:number;
-  locked_at:number|null;start_at:number|null;atr:number|null;last_check:number|null;revision:number;result:string|null};
+  locked_at:number|null;start_at:number|null;atr:number|null;last_check:number|null;deleted_at:number|null;revision:number;result:string|null};
 const active=['ARMED','VALIDATING'];
 const actionId=(id:unknown)=>{
   if(typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))throw new Failure('PATHMATCH_INVALID_ID');
@@ -46,6 +46,7 @@ export async function createPrediction(db:D1Database,body:any){
   const id=actionId(body?.id);
   const previous=await get(db,id);
   if(previous){
+    if(previous.deleted_at!==null)throw new Failure('PATHMATCH_ID_RETIRED',409);
     if(previous.payload!==JSON.stringify(body?.plan))throw new Failure('PATHMATCH_ID_CONFLICT',409);
     return view(previous);
   }
@@ -54,13 +55,14 @@ export async function createPrediction(db:D1Database,body:any){
   await db.prepare(`INSERT OR IGNORE INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at)
     VALUES(?,?,?,?,'DRAFT',?,?)`).bind(id,JSON.stringify(plan),plan.symbol,plan.strategyVersion,created,plan.expiresAt).run();
   const stored=await get(db,id);
+  if(stored?.deleted_at!=null)throw new Failure('PATHMATCH_ID_RETIRED',409);
   if(!stored||stored.payload!==JSON.stringify(plan))throw new Failure('PATHMATCH_ID_CONFLICT',409);
   return view(stored);
 }
 
 export async function armPrediction(db:D1Database,relay:DurableObjectStub,body:any){
   const row=await get(db,body?.id);
-  if(!row)throw new Failure('PATHMATCH_NOT_FOUND',404);
+  if(!row||row.deleted_at!==null)throw new Failure('PATHMATCH_NOT_FOUND',404);
   if(body?.mode!=='SHADOW'||body?.confirm!==true)throw new Failure('PATHMATCH_SHADOW_AUTHORIZATION_REQUIRED',409);
   if(active.includes(row.state))return view(row);
   if(row.state!=='DRAFT'||row.expires_at<=Date.now())throw new Failure('PATHMATCH_DRAFT_UNAVAILABLE',409);
@@ -83,24 +85,25 @@ export async function armPrediction(db:D1Database,relay:DurableObjectStub,body:a
   const end=Math.min(row.expires_at,start+plan.validation.maximumValidationMinutes*minute);
   if(end-start<(plan.forecast.interval==='1m'?15:plan.validation.minimumClosed1mCandles)*minute)throw new Failure('PATHMATCH_WINDOW_TOO_SHORT',409);
   const updated=await db.prepare(`UPDATE pathmatch_predictions SET state='ARMED',locked_at=?,start_at=?,atr=?,expires_at=?,revision=revision+1
-    WHERE id=? AND revision=? AND state='DRAFT' AND (SELECT COUNT(*) FROM pathmatch_predictions
+    WHERE id=? AND revision=? AND deleted_at IS NULL AND state='DRAFT' AND (SELECT COUNT(*) FROM pathmatch_predictions
       WHERE state IN ('ARMED','VALIDATING') AND expires_at>?)<5`).bind(locked,start,atr,end,row.id,row.revision,locked).run();
   if(updated.meta.changes!==1)throw new Failure('PATHMATCH_ACTIVE_LIMIT_OR_CONFLICT',409);
-  return view((await get(db,row.id))!);
+  return predictionStatus(db,row.id);
 }
 
 export async function predictionStatus(db:D1Database,id:unknown){
   const row=await get(db,id);
-  if(!row)throw new Failure('PATHMATCH_NOT_FOUND',404);
+  if(!row||row.deleted_at!==null)throw new Failure('PATHMATCH_NOT_FOUND',404);
   return view(row);
 }
 
 export async function cancelPrediction(db:D1Database,body:any){
   const row=await get(db,body?.id);
-  if(!row)throw new Failure('PATHMATCH_NOT_FOUND',404);
+  if(!row||row.deleted_at!==null)throw new Failure('PATHMATCH_NOT_FOUND',404);
   if(body?.confirm!==true)throw new Failure('PATHMATCH_CONFIRMATION_REQUIRED');
   for(let i=0;i<2;i++){
     const current=i?(await get(db,row.id))!:row;
+    if(current.deleted_at!==null)throw new Failure('PATHMATCH_NOT_FOUND',404);
     if(!['DRAFT',...active].includes(current.state))return view(current);
     const result={...(current.result?JSON.parse(current.result):{}),reason:'USER_CANCELED'};
     const updated=await db.prepare("UPDATE pathmatch_predictions SET state='CANCELED',result=?,revision=revision+1 WHERE id=? AND revision=?")
@@ -110,8 +113,20 @@ export async function cancelPrediction(db:D1Database,body:any){
   throw new Failure('PATHMATCH_CONFLICT',409);
 }
 
+export async function deletePrediction(db:D1Database,body:any){
+  const id=actionId(body?.id);
+  if(body?.confirm!==true)throw new Failure('PATHMATCH_CONFIRMATION_REQUIRED');
+  const row=await db.prepare(`UPDATE pathmatch_predictions SET deleted_at=?,revision=revision+1,
+    state=CASE WHEN state IN ('DRAFT','ARMED','VALIDATING') THEN 'CANCELED' ELSE state END
+    WHERE id=? AND deleted_at IS NULL RETURNING deleted_at`).bind(Date.now(),id).first<{deleted_at:number}>();
+  if(row)return {id,deletedAt:row.deleted_at};
+  const prior=await get(db,id);
+  if(prior?.deleted_at!=null)return {id,deletedAt:prior.deleted_at};
+  throw new Failure('PATHMATCH_NOT_FOUND',404);
+}
+
 export async function predictionHistory(db:D1Database,query:URLSearchParams){
-  const clauses:string[]=[],values:(number|string)[]=[];
+  const clauses:string[]=['deleted_at IS NULL'],values:(number|string)[]=[];
   for(const [key,column] of [['symbol','symbol'],['state','state'],['version','version']]){
     const value=query.get(key);
     if(value){if(!/^[A-Za-z0-9._-]{1,30}$/.test(value))throw new Failure('PATHMATCH_INVALID_FILTER');
@@ -130,7 +145,7 @@ export async function predictionHistory(db:D1Database,query:URLSearchParams){
 }
 
 export async function monitorPredictions(db:D1Database,relay:DurableObjectStub,now=Date.now()){
-  const {results}=await db.prepare("SELECT * FROM pathmatch_predictions WHERE state IN ('ARMED','VALIDATING') ORDER BY created_at LIMIT 5").all<Slot>();
+  const {results}=await db.prepare("SELECT * FROM pathmatch_predictions WHERE deleted_at IS NULL AND state IN ('ARMED','VALIDATING') ORDER BY created_at LIMIT 5").all<Slot>();
   const symbols=new Map<string,Promise<Candle[]>>();
   await Promise.all(results.map(async row=>{
     const start=row.start_at!;
@@ -156,7 +171,7 @@ export async function monitorPredictions(db:D1Database,relay:DurableObjectStub,n
     if(now>=row.expires_at+grace&&state!=='CANCELED'&&state!=='COMPLETED'){
       state='EXPIRED';result={...result,lastObservation:result.reason,reason:'WINDOW_EXPIRED'};
     }
-    await db.prepare("UPDATE pathmatch_predictions SET state=?,result=?,last_check=?,revision=revision+1 WHERE id=? AND revision=? AND state IN ('ARMED','VALIDATING')")
+    await db.prepare("UPDATE pathmatch_predictions SET state=?,result=?,last_check=?,revision=revision+1 WHERE id=? AND revision=? AND deleted_at IS NULL AND state IN ('ARMED','VALIDATING')")
       .bind(state,JSON.stringify(result),now,row.id,row.revision).run();
   }));
 }

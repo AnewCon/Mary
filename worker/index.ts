@@ -1,4 +1,4 @@
-import { armPrediction, cancelPrediction, createPrediction, monitorPredictions, pathRelay, predictionHistory, predictionReference, predictionStatus } from './pathmatch-store';
+import { armPrediction, cancelPrediction, createPrediction, deletePrediction, monitorPredictions, pathRelay, predictionHistory, predictionReference, predictionStatus } from './pathmatch-store';
 import { analyzeMarket } from './market-analyze';
 import { ingestOI, pruneOI } from './oi-history';
 export { MarketRelay } from './market-relay';
@@ -50,7 +50,7 @@ if(p==='/api/market/analyze'&&m==='POST'){
 }
 if(p.startsWith('/api/predictions/')){
   const op=p.split('/').at(-1);
-  const principal=await auth(r,e,m==='POST'?'write':'read');
+  const principal=await auth(r,e,m==='POST'?'write':'read',op==='delete');
   if(m==='GET'&&op==='history')return json(await predictionHistory(e.DB,u.searchParams));
   if(m==='GET'&&op==='status')return json(await predictionStatus(e.DB,u.searchParams.get('id')));
   if(m==='GET'&&op==='reference'){await limit(e,'pathmatch-reference:'+principal,10);return json(await predictionReference(pathRelay(e.MARKET_RELAY),u.searchParams.get('symbol')));}
@@ -60,6 +60,7 @@ if(p.startsWith('/api/predictions/')){
     if(op==='create')return json(await createPrediction(e.DB,data));
     if(op==='arm')return json(await armPrediction(e.DB,pathRelay(e.MARKET_RELAY),data));
     if(op==='cancel')return json(await cancelPrediction(e.DB,data));
+    if(op==='delete')return json(await deletePrediction(e.DB,data));
   }
   throw new Failure('NOT_FOUND',404);
 }

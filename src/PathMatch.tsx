@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, RefreshCw } from 'lucide-react';
+import { Activity, RefreshCw, Trash2 } from 'lucide-react';
 import type { Plan, Candle } from '../worker/pathmatch-core';
 import './pathmatch.css';
 
@@ -69,9 +69,11 @@ function Chart({row}:{row:Prediction}){
 export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promise<any>}){
   const [rows,setRows]=useState<Prediction[]>([]),[selected,setSelected]=useState(''),[busy,setBusy]=useState(true),[error,setError]=useState('');
   const [now,setNow]=useState(Date.now);
+  const [deleting,setDeleting]=useState(false);
+  const removed=useRef(new Set<string>());
   async function load(){
     setBusy(true);setError('');
-    try{setRows(await api('/predictions/history?limit=20'));}
+    try{const entries:Prediction[]=await api('/predictions/history?limit=20');setRows(entries.filter(item=>!removed.current.has(item.id)));}
     catch{setError('暂时无法读取预测记录。');}
     finally{setBusy(false);}
   }
@@ -83,6 +85,19 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
     const timer=window.setInterval(()=>void load(),60000);
     return ()=>clearInterval(timer);
   },[watching,api]);
+  async function remove(item:Prediction){
+    const message=['ARMED','VALIDATING'].includes(item.state)
+      ? `停止 ${item.symbol} 的观察并删除这条预测记录？` : `删除这条 ${item.symbol} 预测记录？`;
+    if(!window.confirm(message))return;
+    setDeleting(true);setError('');
+    try{
+      await api('/predictions/delete',{id:item.id,confirm:true});
+      removed.current.add(item.id);
+      setRows(previous=>previous.filter(candidate=>candidate.id!==item.id));
+      setSelected(current=>current===item.id?'':current);
+    }catch{setError('暂时无法删除预测记录，请重试。');}
+    finally{setDeleting(false);}
+  }
   return <section className="pathmatch-workspace">
     <div className="panel pathmatch-head"><div><h2><Activity size={19}/> 预测交易 / PathMatch</h2><p>Binance Demo · 影子观察</p></div>
       <button onClick={()=>void load()} disabled={busy}><RefreshCw size={15}/> {busy?'读取中…':'刷新记录'}</button>
@@ -95,7 +110,9 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
       </button>)}</div>
       <div className="panel pathmatch-detail">
         <div className="panelhead"><div><h2>{row.symbol} · {row.plan.direction==='LONG'?'多头':'空头'}</h2><p>{states[row.state]??row.state} · {row.id}</p></div>
-          <span className="badge">{row.result?.similarity==null?'相似率待计算':row.result.similarity.toFixed(1)+'% 相似率'}</span></div>
+          <div className="actions"><span className="badge">{row.result?.similarity==null?'相似率待计算':row.result.similarity.toFixed(1)+'% 相似率'}</span>
+            <button type="button" className="danger" disabled={deleting} onClick={()=>void remove(row)}><Trash2 size={14}/>{deleting?'删除中…':'删除记录'}</button>
+          </div></div>
         <div className="pathmatch-inner">
           <p className="pathmatch-legend"><span>□ 预测蜡烛</span><span>■ 实际已收盘 1m</span></p>
           <Chart row={row}/>
