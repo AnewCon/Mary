@@ -1,18 +1,27 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { priceFormat, type Candle, type Frame } from './grid-engine';
 
-export type Drawing={id:number;price:number};
-type Props={bars:Candle[];tick:string;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
- tool:'PAN'|'LINE'|'BOX';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;
+export type DrawingPoint={time:number;price:number};
+type Segment={start:DrawingPoint;end:DrawingPoint};
+export type Drawing={id:number;price:number}|({id:number}&Segment);
+
+function segmentDistance(x:number,y:number,x1:number,y1:number,x2:number,y2:number){
+ const dx=x2-x1,dy=y2-y1;
+ const fraction=Math.max(0,Math.min(1,((x-x1)*dx+(y-y1)*dy)/(dx*dx+dy*dy||1)));
+ return Math.hypot(x-(x1+dx*fraction),y-(y1+dy*fraction));
+}
+type Props={bars:Candle[];tick:string;step:number;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
+ tool:'PAN'|'LINE'|'BOX'|'SEGMENT';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;onSegment:(segment:Segment)=>void;
  onDrag:(which:'upper'|'lower',price:number,commit:boolean)=>void};
 const axisTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export const fullTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export default function GridChart(p:Props){
  const canvas=useRef<HTMLCanvasElement>(null);
- const geom=useRef<{left:number;right:number;top:number;bottom:number;index:(x:number)=>number;price:(y:number)=>number;y:(price:number)=>number}|null>(null);
- const drag=useRef<{which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;moving?:boolean}|null>(null);
+ const geom=useRef<{left:number;right:number;top:number;bottom:number;index:(x:number)=>number;price:(y:number)=>number;y:(price:number)=>number;timeAt:(x:number)=>number;timeX:(time:number)=>number}|null>(null);
+ const drag=useRef<{which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;moving?:boolean;segment?:DrawingPoint}|null>(null);
  const [size,setSize]=useState({width:0,height:0});
  const [zoom,setZoom]=useState(110),[offset,setOffset]=useState(0);
+ const [preview,setPreview]=useState<Segment|null>(null);
  const [cursor,setCursor]=useState<{x:number;y:number}|null>(null);
  const end=Math.max(1,p.bars.length-Math.min(offset,Math.max(0,p.bars.length-5)));
  const start=Math.max(0,end-zoom);
@@ -46,7 +55,9 @@ export default function GridChart(p:Props){
   const price=(py:number)=>max-(py-top)/(bottom-top)*(max-min);
   const x=(index:number)=>left+(index+.5)*dx;
   const ix=(px:number)=>Math.min(viewed.length-1,Math.max(0,Math.floor((px-left)/dx)));
-  geom.current={left,right,top,bottom,index:ix,price,y};
+  const timeX=(time:number)=>x((time-viewed[0].time)/p.step);
+  const timeAt=(px:number)=>viewed[0].time+((px-left)/dx-.5)*p.step;
+  geom.current={left,right,top,bottom,index:ix,price,y,timeAt,timeX};
   const line=(x1:number,y1:number,x2:number,y2:number,color:string)=>{ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
   for(let i=0;i<=5;i++){
    const yy=top+(bottom-top)*i/5;
@@ -84,7 +95,25 @@ export default function GridChart(p:Props){
   p.levels.forEach((level,i)=>mark(level,i===0?'#67ce9e':i===p.levels.length-1?'#ed8791':'#719caf',
    i===0||i===p.levels.length-1?[]:[3,4],newest.some(e=>e.kind==='OPEN'&&e.price===level)));
   p.stops.forEach(v=>{if(v>0)mark(v,'#edaf68',[5,4]);});
-  p.lines.forEach(l=>mark(l.price,l.id===p.selected?'#fff0b8':'#babca8',[4,2],l.id===p.selected));
+  ctx.save();
+  ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();
+  const renderSegment=(s:Segment,color:string,handles:boolean)=>{
+   const x1=timeX(s.start.time),y1=y(s.start.price),x2=timeX(s.end.time),y2=y(s.end.price);
+   ctx.lineWidth=handles?2:1.5;
+   line(x1,y1,x2,y2,color);
+   if(handles){
+    ctx.fillStyle=color;
+    for(const [px,py] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();}
+   }
+   ctx.lineWidth=1;
+  };
+  for(const drawing of p.lines){
+   const selected=drawing.id===p.selected;
+   if('price' in drawing)mark(drawing.price,selected?'#fff0b8':'#babca8',[4,2],selected);
+   else renderSegment(drawing,selected?'#fff0b8':'#b7d4fa',selected);
+  }
+  if(preview)renderSegment(preview,'#f2cf84',true);
+  ctx.restore();
   if(p.anchor)mark(p.anchor,'#e8ca83',[3,3],true);
   const openDrawn=new Map<number,{x:number;y:number}>();
   for(const frame of p.frames?.slice(start,end)??[]){
@@ -116,16 +145,26 @@ export default function GridChart(p:Props){
    ctx.fillStyle='#31494c';ctx.fillRect(right,cursor.y-8,width-right,16);ctx.fillStyle='#dbefec';
    ctx.fillText(priceFormat(Math.max(0,price(cursor.y)),p.tick),right+4,cursor.y+4);
   }
- },[size,p,zoom,offset,cursor]);
+ },[size,p,zoom,offset,cursor,preview]);
  function position(e:ReactPointerEvent<HTMLCanvasElement>){
   const rect=e.currentTarget.getBoundingClientRect();
   return {x:e.clientX-rect.left,y:e.clientY-rect.top};
+ }
+ function drawingPoint(pos:{x:number;y:number},g:NonNullable<typeof geom.current>){
+  const x=Math.min(g.right,Math.max(g.left,pos.x)),y=Math.min(g.bottom,Math.max(g.top,pos.y));
+  return {time:g.timeAt(x),price:Math.max(Number(p.tick),g.price(y))};
  }
  function move(e:ReactPointerEvent<HTMLCanvasElement>){
   const pos=position(e),g=geom.current,d=drag.current;
   if(!g)return;
   setCursor(pos);
   if(!d)return;
+  if(d.segment){
+   const end=drawingPoint(pos,g);
+   if(e.shiftKey)end.price=d.segment.price;
+   setPreview({start:d.segment,end});
+   return;
+  }
   if(d.which){
    d.price=(d.toPrice??g.price)(Math.min(g.bottom,Math.max(g.top,pos.y)));
    d.moving=true;p.onDrag(d.which,d.price,false);
@@ -137,7 +176,14 @@ export default function GridChart(p:Props){
  }
  function down(e:ReactPointerEvent<HTMLCanvasElement>){
   const pos=position(e),g=geom.current;
-  if(!g||pos.x<g.left||pos.x>g.right||pos.y<g.top||pos.y>g.bottom)return;
+  if(e.button!==0||!e.isPrimary||!g||pos.x<g.left||pos.x>g.right||pos.y<g.top||pos.y>g.bottom)return;
+  if(p.tool==='SEGMENT'&&!p.locked){
+   const start=drawingPoint(pos,g);
+   drag.current={x:pos.x,end:offset,segment:start};
+   setPreview({start,end:start});
+   e.currentTarget.setPointerCapture(e.pointerId);
+   return;
+  }
   const upper=p.levels.at(-1),lower=p.levels[0];
   const which=p.tool==='PAN'&&!p.locked&&upper&&Math.abs(pos.y-g.y(upper))<8?'upper':
    p.tool==='PAN'&&!p.locked&&lower&&Math.abs(pos.y-g.y(lower))<8?'lower':undefined;
@@ -147,10 +193,19 @@ export default function GridChart(p:Props){
  function up(e:ReactPointerEvent<HTMLCanvasElement>){
   const d=drag.current,g=geom.current,pos=position(e);drag.current=null;
   if(!d||!g)return;
+  if(d.segment){
+   setPreview(null);
+   const end=drawingPoint(pos,g);
+   if(e.shiftKey)end.price=d.segment.price;
+   if(Math.hypot(g.timeX(end.time)-g.timeX(d.segment.time),g.y(end.price)-g.y(d.segment.price))>=4)
+    p.onSegment({start:d.segment,end});
+   return;
+  }
   if(d.which&&d.moving&&d.price!==undefined){p.onDrag(d.which,d.price,true);return;}
   if(d.moving||pos.y<g.top||pos.y>g.bottom)return;
   if(p.tool!=='PAN'&&!p.locked){p.onPrice(g.price(pos.y));return;}
-  const line=p.lines.find(l=>Math.abs(pos.y-g.y(l.price))<8);
+  const line=[...p.lines].reverse().find(l=>'price' in l?Math.abs(pos.y-g.y(l.price))<8:
+   segmentDistance(pos.x,pos.y,g.timeX(l.start.time),g.y(l.start.price),g.timeX(l.end.time),g.y(l.end.price))<8);
   p.onSelect(line?.id??0);
  }
  const hovered=cursor&&geom.current&&viewed[geom.current.index(cursor.x)];
@@ -161,7 +216,7 @@ export default function GridChart(p:Props){
    <span>量 {candle.volume.toLocaleString('zh-CN',{maximumFractionDigits:2})}</span></div>}
   <canvas aria-label="历史蜡烛图与成交量" ref={canvas} className={'grid-chart grid-tool-'+p.tool.toLowerCase()}
    onPointerMove={move} onPointerDown={down} onPointerUp={up} onPointerLeave={()=>setCursor(null)}
-   onPointerCancel={()=>{if(drag.current?.which&&drag.current.price!==undefined)p.onDrag(drag.current.which,drag.current.price,true);drag.current=null;}}/>
+   onPointerCancel={()=>{if(drag.current?.which&&drag.current.price!==undefined)p.onDrag(drag.current.which,drag.current.price,true);drag.current=null;setPreview(null);}}/>
   {offset>0&&<button className="grid-return-chart" type="button" onClick={()=>setOffset(0)}>回到最新</button>}
  </div>;
 }

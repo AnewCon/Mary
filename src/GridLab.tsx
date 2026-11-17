@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChartCandlestick, Download, Lock, Unlock, Play, Pause, RotateCcw, Save, FolderOpen, SkipBack, SkipForward, Undo2, Redo2 } from 'lucide-react';
-import GridChart, { fullTime, type Drawing } from './GridChart';
+import GridChart, { fullTime, type Drawing, type DrawingPoint } from './GridChart';
 import { defaults, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
 import './grid-lab.css';
 
@@ -85,7 +85,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  const [config,setConfig]=useState<GridConfig>(defaults),[simulation,setSimulation]=useState<GridMarket|null>(null);
  const [result,setResult]=useState<GridResult|null>(null),[cursor,setCursor]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(10);
  const [drawings,setDrawings]=useState(initialDrawings),[undo,setUndo]=useState<DrawingState[]>([]),[redo,setRedo]=useState<DrawingState[]>([]);
- const [selected,setSelected]=useState<number|null>(null),[tool,setTool]=useState<'PAN'|'LINE'|'BOX'>('PAN');
+ const [selected,setSelected]=useState<number|null>(null),[tool,setTool]=useState<'PAN'|'LINE'|'BOX'|'SEGMENT'>('PAN');
  const [anchor,setAnchor]=useState<number|null>(null),[locked,setLocked]=useState(false),[precise,setPrecise]=useState(true);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dark,setDark]=useState(true);
  const [saved,setSaved]=useState(false);
@@ -124,6 +124,13 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
   if(commit){
    replaceDrawings(next,dragStart.current??drawings);dragStart.current=null;
   }else{if(!dragStart.current)dragStart.current=drawings;setDrawings(next);}
+ }
+ function addSegment(segment:{start:DrawingPoint;end:DrawingPoint}){
+  if(!market||locked||result||busy)return;
+  const id=lineId.current++;
+  replaceDrawings({...drawings,lines:[...drawings.lines,{id,...segment}]});
+  setSelected(id);
+  setTool('PAN');
  }
  function clickPrice(price:number){
   if(!market||result||locked||busy)return;
@@ -261,6 +268,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <button type="button" aria-pressed={tool==='PAN'} onClick={()=>{setTool('PAN');setAnchor(null);}}>平移</button>
        <button type="button" disabled={locked||!!result} aria-pressed={tool==='BOX'} onClick={()=>{setTool('BOX');setAnchor(null);}}>绘制网格箱体</button>
        <button type="button" disabled={locked||!!result} aria-pressed={tool==='LINE'} onClick={()=>{setTool('LINE');setAnchor(null);}}>画水平线</button>
+       <button type="button" disabled={locked||!!result} aria-pressed={tool==='SEGMENT'} onClick={()=>{setTool('SEGMENT');setAnchor(null);}}>拉直线</button>
        <button type="button" disabled={locked||!!result||!selected} onClick={()=>{replaceDrawings({...drawings,lines:drawings.lines.filter(l=>l.id!==selected)});setSelected(null);}}>删除选中</button>
        <button type="button" disabled={locked||!!result} onClick={()=>{replaceDrawings(initialDrawings);setSelected(null);setAnchor(null);}}>清除绘图</button>
        <button type="button" aria-label="撤销" disabled={locked||!!result||!undo.length} onClick={()=>{setRedo([...redo,drawings]);setDrawings(undo.at(-1)!);setUndo(undo.slice(0,-1));setSelected(null);}}><Undo2 size={15}/></button>
@@ -268,10 +276,11 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <button type="button" aria-pressed={locked} onClick={()=>{setLocked(v=>!v);setTool('PAN');setAnchor(null);}}>{locked?<Lock size={15}/>:<Unlock size={15}/>} {locked?'解锁':'锁定'}</button>
       </div>
       {tool==='BOX'&&<p className="grid-draw-hint">{anchor===null?'点击图表确定第一条边界。':'点击确定第二条边界。'}</p>}
-      <GridChart key={market.symbol+market.interval+market.from+(result?'replay':'history')} bars={displayBars} tick={market.rules.tick} levels={levels}
+      {tool==='SEGMENT'&&<p className="grid-draw-hint">从起点按住拖到终点，松开确定。按住 Shift 可画水平线。</p>}
+      <GridChart key={market.symbol+market.interval+market.from+(result?'replay':'history')} bars={displayBars} tick={market.rules.tick} step={simulation?.step??market.step} levels={levels}
        stops={[config.stopLower,config.stopUpper]} lines={drawings.lines} selected={selected} locked={locked||!!result}
        tool={result?'PAN':tool} anchor={anchor} frame={frame} frames={visibleFrames} onPrice={clickPrice}
-       onSelect={id=>setSelected(id||null)} onDrag={box}/>
+       onSelect={id=>setSelected(id||null)} onDrag={box} onSegment={addSegment}/>
       {result&&<div className="grid-replay">
        <button type="button" onClick={()=>{if(ended)setCursor(0);setPlaying(v=>!v);}}>{playing?<Pause size={15}/>:<Play size={15}/>} {playing?'暂停':cursor?'继续播放':'播放'}</button>
        <button type="button" aria-label="重新播放" onClick={()=>{setCursor(0);setPlaying(true);}}><RotateCcw size={15}/></button>
