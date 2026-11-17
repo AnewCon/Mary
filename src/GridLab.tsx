@@ -310,7 +310,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <button type="button" aria-pressed={locked} onClick={()=>{setLocked(v=>!v);setTool('PAN');setAnchor(null);}}>{locked?<Lock size={15}/>:<Unlock size={15}/>} {locked?'解锁':'锁定'}</button>
       </div>
       {tool==='BOX'&&<p className="grid-draw-hint">{anchor===null?'点击图表确定第一条边界。':'点击确定第二条边界。'}</p>}
-      {tool==='ANGLE'&&<p className="grid-draw-hint">按住红色上沿或绿色下沿的后段，上下拖动调整角度。</p>}
+      {tool==='ANGLE'&&<p className="grid-draw-hint">按住边线旁的旋转手柄上下拖动，也可以直接拖动边线后段。</p>}
       {tool==='SEGMENT'&&<p className="grid-draw-hint">从起点按住拖到终点，松开确定。按住 Shift 可画水平线。</p>}
       <GridChart key={market.symbol+market.interval+market.from+(result?'replay':'history')} bars={displayBars} tick={market.rules.tick} step={simulation?.step??market.step} levels={levels} angled={angled} levelsAt={angled&&levels.length?levelsAt:undefined}
        stops={[config.stopLower,config.stopUpper]} lines={drawings.lines} selected={selected} locked={locked||!!result}

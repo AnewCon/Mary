@@ -57,3 +57,9 @@
 @media(max-width:520px){.grid-lab{padding:5px;gap:8px}.grid-lab-hero{padding:13px;min-height:142px}.grid-lab-card{padding:7px}.grid-chart{height:290px}.grid-chart-ohlc{font-size:.56rem}.grid-market-card form label{flex:1 1 115px}.grid-lab .grid-replay{gap:4px}.grid-chart-top span{font-size:.66rem}}
 
 fieldset.grid-side{border:0;padding:0;margin:0}
+
+.grid-lab .grid-rotate-handle{position:absolute;z-index:2;transform:translate(-50%,-50%);width:28px;height:28px;min-height:0;padding:0;border-radius:50%;background:#f6f9f4;color:#1a3435;box-shadow:0 1px 6px #081216b0;touch-action:none;cursor:grab}
+.grid-lab .grid-rotate-upper{border:2px solid #ed8791}
+.grid-lab .grid-rotate-lower{border:2px solid #67ce9e}
+.grid-lab .grid-rotate-handle:active{cursor:grabbing}
+.grid-lab .grid-rotate-handle:focus-visible{outline:2px solid #ffe199;outline-offset:2px}
