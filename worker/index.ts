@@ -1,3 +1,4 @@
+import { armPrediction, cancelPrediction, createPrediction, monitorPredictions, pathRelay, predictionHistory, predictionReference, predictionStatus } from './pathmatch-store';
 import { analyzeMarket } from './market-analyze';
 import { ingestOI, pruneOI } from './oi-history';
 export { MarketRelay } from './market-relay';
@@ -46,6 +47,21 @@ if(p==='/api/market/analyze'&&m==='POST'){
   const principal=await auth(r,e,'read');
   await limit(e,'market-analysis:'+principal,16);
   return json(await analyzeMarket(e.DB,await body(r),c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay')),oiInterval,e.MARKET_SIGNAL_CONFIG,e.MARKET_CACHE_TTLS));
+}
+if(p.startsWith('/api/predictions/')){
+  const op=p.split('/').at(-1);
+  const principal=await auth(r,e,m==='POST'?'write':'read');
+  if(m==='GET'&&op==='history')return json(await predictionHistory(e.DB,u.searchParams));
+  if(m==='GET'&&op==='status')return json(await predictionStatus(e.DB,u.searchParams.get('id')));
+  if(m==='GET'&&op==='reference'){await limit(e,'pathmatch-reference:'+principal,10);return json(await predictionReference(pathRelay(e.MARKET_RELAY),u.searchParams.get('symbol')));}
+  if(m==='POST'){
+    await limit(e,'pathmatch:'+principal,12);
+    const data=await body(r);
+    if(op==='create')return json(await createPrediction(e.DB,data));
+    if(op==='arm')return json(await armPrediction(e.DB,pathRelay(e.MARKET_RELAY),data));
+    if(op==='cancel')return json(await cancelPrediction(e.DB,data));
+  }
+  throw new Failure('NOT_FOUND',404);
 }
 if(p.startsWith('/api/market/')&&m==='GET'){
   await auth(r,e,'read');
@@ -164,6 +180,8 @@ if(/^\/api\/trades\/actions\/[^/]+\/reconcile$/.test(p)&&m==='POST')return json(
 if(/^\/api\/trades\/[^/]+\/close$/.test(p)&&m==='POST'){await limit(e,'close',10);return json(await close(e,decodeURIComponent(p.split('/')[3]),await body(r),sync))}
 throw new Failure('NOT_FOUND',404)}
 export default {async fetch(r:Request,e:Env,c:ExecutionContext){try{return await route(r,e,c)}catch(err){return json(err instanceof Failure?err.code:'INTERNAL_ERROR',err instanceof Failure?err.status:500)}},async scheduled(_c:ScheduledController,e:Env,ctx:ExecutionContext){
+ctx.waitUntil(monitorPredictions(e.DB,pathRelay(e.MARKET_RELAY)).catch(err=>console.log('pathmatch monitor',String(err))));
+
 if(new Date(_c.scheduledTime).getUTCHours()===3&&new Date(_c.scheduledTime).getUTCMinutes()===17){
   const requested=Number(e.OI_RETENTION_DAYS);
   const days=Number.isInteger(requested)&&requested>=1&&requested<=365?requested:90;

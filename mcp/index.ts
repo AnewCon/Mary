@@ -1,3 +1,4 @@
+import { predictionPaths, predictionTools } from './prediction-tools';
 import {marketTools,marketPaths} from './market-tools';
 import { liveActionByName, liveTools } from './binance-live-tools';
 import { binanceDemoTools } from './binance-demo-tools';
@@ -19,8 +20,14 @@ export default{async fetch(r:Request,e:Env){const u=new URL(r.url);if(u.pathname
  if(msg.method==='server/discover')result={supportedVersions:versions,capabilities:{tools:{}},serverInfo:{name:'QuantOS',version:'1.1.0'}};
  else if(msg.method==='initialize')result={protocolVersion:versions.includes(msg.params?.protocolVersion)?msg.params.protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'QuantOS',version:'1.1.0'},instructions:'私人欧意模拟账户。可以读取账户与仓位、保存计划；另有独立授权的模拟盘交易工具。交易工具会改变模拟账户，计划工具不会下单。实盘与提现未开放。'};
  else if(msg.method==='ping')result={};
- else if(msg.method==='tools/list'){const access=await api(e,authorization,'/api/demo/capabilities');const paper=await api(e,authorization,'/api/paper/capabilities');const binance=await api(e,authorization,'/api/binance-demo/status');const binanceWrite=binance.ok&&binance.data.enabled?await api(e,authorization,'/api/binance-demo/capabilities'):null;const live=await api(e,authorization,'/api/binance-live/capabilities');result={tools:[...tools,...marketTools,...(live.ok&&live.data.enabled?liveTools:[]),...(binance.ok&&binance.data.enabled?binanceDemoTools.filter(t=>!t.kind||t.query||binanceWrite?.ok&&binanceWrite.data.enabled).map(({kind,query,...t})=>t):[]),...(access.ok&&access.data.enabled?demoTools:[]),...paperTools.filter(t=>t.annotations.readOnlyHint||paper.ok&&paper.data.enabled)]}}
- else if(msg.method==='tools/call'){const name=msg.params?.name,args=msg.params?.arguments||{};const tool=[...tools,...marketTools,...demoTools,...paperTools,...binanceDemoTools,...liveTools].find(t=>t.name===name);if(!tool)return error(id,-32602,'UNKNOWN_TOOL');if(!args||typeof args!=='object'||Array.isArray(args))return error(id,-32602,'INVALID_ARGUMENTS');const allowed=Object.keys(tool.inputSchema.properties);if(Object.keys(args).some(k=>!allowed.includes(k)))return error(id,-32602,'UNEXPECTED_ARGUMENT');if(name==='quantos_market_analyze'){
+ else if(msg.method==='tools/list'){const access=await api(e,authorization,'/api/demo/capabilities');const paper=await api(e,authorization,'/api/paper/capabilities');const binance=await api(e,authorization,'/api/binance-demo/status');const binanceWrite=binance.ok&&binance.data.enabled?await api(e,authorization,'/api/binance-demo/capabilities'):null;const live=await api(e,authorization,'/api/binance-live/capabilities');result={tools:[...tools,...marketTools,...predictionTools.filter(t=>t.annotations.readOnlyHint||paper.ok&&paper.data.enabled),...(live.ok&&live.data.enabled?liveTools:[]),...(binance.ok&&binance.data.enabled?binanceDemoTools.filter(t=>!t.kind||t.query||binanceWrite?.ok&&binanceWrite.data.enabled).map(({kind,query,...t})=>t):[]),...(access.ok&&access.data.enabled?demoTools:[]),...paperTools.filter(t=>t.annotations.readOnlyHint||paper.ok&&paper.data.enabled)]}}
+ else if(msg.method==='tools/call'){const name=msg.params?.name,args=msg.params?.arguments||{};const tool=[...tools,...marketTools,...predictionTools,...demoTools,...paperTools,...binanceDemoTools,...liveTools].find(t=>t.name===name);if(!tool)return error(id,-32602,'UNKNOWN_TOOL');if(!args||typeof args!=='object'||Array.isArray(args))return error(id,-32602,'INVALID_ARGUMENTS');const allowed=Object.keys(tool.inputSchema.properties);if(Object.keys(args).some(k=>!allowed.includes(k)))return error(id,-32602,'UNEXPECTED_ARGUMENT');if(Object.hasOwn(predictionPaths,name)){
+const op=predictionPaths[name];
+const params=new URLSearchParams(Object.entries(args).map(([key,value])=>[key,String(value)]));
+const write=['create','arm','cancel'].includes(op);
+const data=await api(e,authorization,'/api/predictions/'+op+(write?'':'?'+params),write?args:undefined);
+result=data.ok?toolResult(data.data):toolResult(data.error,true)
+}else if(name==='quantos_market_analyze'){
 const data=await api(e,authorization,'/api/market/analyze',args);
 result=data.ok?toolResult(data.data):toolResult(data.error,true)
 }else if(Object.hasOwn(marketPaths,name)){

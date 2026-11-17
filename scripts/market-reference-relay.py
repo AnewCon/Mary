@@ -17,6 +17,7 @@ ORIGINS = {
     'marginpad': 'https://marginpad.io',
     'coingecko': 'https://api.coingecko.com',
     'bybit': 'https://api.bybit.com',
+    'binance_demo_public': 'https://demo-fapi.binance.com',
 }
 
 
@@ -36,12 +37,18 @@ def allowed(provider, target):
         'blockmetric': (r'/v1/heatmap/[A-Z0-9]{1,20}', {'tf', 'hours'}),
         'marginpad': (r'/api/v1/liquidations/live', {'symbol', 'limit'}),
         'coingecko': (r'/api/v3/coins/markets', {'vs_currency', 'order', 'sparkline', 'per_page'}),
+        'binance_demo_public': (r'/fapi/v1/(?:klines|time)', {'symbol', 'interval', 'limit'}),
         'bybit': (r'/v5/market/(?:tickers|account-ratio)', {'category', 'symbol', 'period', 'limit'}),
     }
     if provider not in rules:
         return False
     path, keys = rules[provider]
     params = parse_qs(url.query, keep_blank_values=True, max_num_fields=6)
+    if provider=='binance_demo_public':
+        if url.path=='/fapi/v1/time': return not params
+        if url.path!='/fapi/v1/klines' or set(params)!={'symbol','interval','limit'}: return False
+        if params['interval'] not in (['1m'],['5m']) or params['limit'] not in (['3'],['16'],['17']): return False
+        if not re.fullmatch(r'[A-Z0-9]{2,20}USDT',params['symbol'][0]): return False
     return bool(re.fullmatch(path, url.path)) and all(
         key in keys and len(values) == 1 and re.fullmatch(r'[A-Za-z0-9_]{1,30}', values[0])
         for key, values in params.items())
