@@ -4,7 +4,7 @@ import type { Plan, Candle } from '../worker/pathmatch-core';
 import './pathmatch.css';
 
 type Point=Candle&{expected:number;lower:number;upper:number;similarity:number};
-type Prediction={id:string;symbol:string;state:string;mode:string;startAt:number|null;expiresAt:number;createdAt:number;atr:number|null;
+type Prediction={strategy?:{strategyId:string;version:string;contentHash:string}|null;id:string;symbol:string;state:string;mode:string;startAt:number|null;expiresAt:number;createdAt:number;atr:number|null;
   plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[];fit?:{pathSimilarity:number;rangeOverlap:number;trendSimilarity:number;similarity:number};complete?:boolean;veto?:string|null;decision?:string}|null};
 const stamp=(value:number)=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
 const states:Record<string,string>={DRAFT:'草稿',ARMED:'已锁定',VALIDATING:'观测中',CANCELED:'已取消',EXPIRED:'已到期',COMPLETED:'拟合完成'};
@@ -114,6 +114,7 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
             <button type="button" className="danger" disabled={deleting} onClick={()=>void remove(row)}><Trash2 size={14}/>{deleting?'删除中…':'删除记录'}</button>
           </div></div>
         <div className="pathmatch-inner">
+          <p>绑定策略 {row.strategy?<span title={row.strategy.contentHash}>{row.strategy.strategyId} v{row.strategy.version}</span>:'—'}</p>
           <p className="pathmatch-legend"><span>□ 预测蜡烛</span><span>■ 实际已收盘 1m</span></p>
           <Chart row={row}/>
           {row.plan.forecast.interval==='5m'&&<p>历史计划 · 三根 5 分钟预测，开盘价按上一根预测收盘价绘制。</p>}

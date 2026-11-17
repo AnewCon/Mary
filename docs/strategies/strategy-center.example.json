@@ -1,0 +1,109 @@
+{
+  "name": "QuantOS 日内复核示例",
+  "document": "基于用户提供的 V2.4.1 历史恢复规则、V2.5 实验权重及现有 PathMatch 15 根 1m 观察功能的集成示例。它是新配置示例，不是原版策略。筛选数量、数据时效、量能门槛与 A/B 分类为待审批的实现建议。10×，80 USDT 预算，组合保证金≤32、计划止损≤2、单笔计划止损≤0.35，净盈亏比≥1.8。日线异常检查后，按 4H、1H、15M、5M 顺序复核。方向和入场评分独立，保护未核验、行情失效、风险不足时等待。",
+  "config": {
+    "schemaVersion": 1,
+    "strategyId": "quantos-intraday",
+    "version": "2.6.0-review.1",
+    "market": "BINANCE_DEMO_FUTURES",
+    "riskLevel": "HIGH",
+    "timeframes": {
+      "primary": "5m",
+      "entry": "5m",
+      "confirmation": [
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "pathValidation": "1m"
+    },
+    "screening": {
+      "contract": "USDT_PERPETUAL",
+      "limit": 10,
+      "minQuoteVolumeUsdt": 0,
+      "excludedConditions": [
+        "流动性未验证",
+        "冷却期",
+        "15M 结构未确认"
+      ]
+    },
+    "indicators": {
+      "trendWeight": 40,
+      "derivativesWeight": 20,
+      "liquidationWeight": 15,
+      "positioningWeight": 10,
+      "liquidityWeight": 15
+    },
+    "scoring": {
+      "method": "INDEPENDENT_DIRECTION_AND_ENTRY",
+      "minimumDirection": 80,
+      "minimumEntry": 80,
+      "gradeA": 85,
+      "gradeB": 80
+    },
+    "entryRules": {
+      "orderType": "LIMIT",
+      "trendAligned": true,
+      "structureRequired": true,
+      "timingRequired": true,
+      "longCondition": "4H 与 1H 同为多头，15M 结构与 5M 时机经复核。",
+      "shortCondition": "4H 与 1H 同为空头，15M 结构与 5M 时机经复核。"
+    },
+    "exitRules": {
+      "stopRequired": true,
+      "takeProfitRequired": true,
+      "trigger": "MARK_PRICE",
+      "invalidation": "达到硬失效价或预测路径被通道否决时重新评估。"
+    },
+    "riskManagement": {
+      "leverage": 10,
+      "budgetUsdt": 80,
+      "marginUsdt": 32,
+      "portfolioLossUsdt": 2,
+      "singleLossUsdt": 0.35,
+      "minNetRewardRisk": 1.8
+    },
+    "positionManagement": {
+      "maxSymbols": 5,
+      "maxSameDirectionCorrelation": 0.85
+    },
+    "anomalyFilters": {
+      "dailyBars": 14,
+      "dailyGainPct": 300,
+      "intradayRangePct": 400,
+      "cooldownBars": 7
+    },
+    "pathMatch": {
+      "enabled": true,
+      "mode": "SHADOW",
+      "forecast5mCount": 3,
+      "forecast1mCount": 15,
+      "windowMinutes": 15,
+      "minClosedCandles": 3,
+      "similarityThreshold": 85,
+      "atrTolerance": 0.5,
+      "invalidations": "HARD_PRICE_AND_CHANNEL",
+      "outperformance": "REVIEW_ONLY",
+      "requireClosedUtcCandles": true,
+      "expiry": "FIXED_WINDOW"
+    },
+    "execution": {
+      "mode": "REVIEW_ONLY",
+      "cancelAfterMinutes": 45,
+      "onStaleData": "WAIT",
+      "onNetworkError": "RECONCILE",
+      "onProtectionFailure": "PAUSE_AND_CANCEL_REMAINDER"
+    },
+    "dataRequirements": {
+      "requiredSources": [
+        "BINANCE_KLINES",
+        "BINANCE_DEMO_ACCOUNT"
+      ],
+      "maxAgeSeconds": 120
+    },
+    "featureFlags": {
+      "derivativesExperimental": true,
+      "pathMatchAuto": false
+    }
+  }
+}

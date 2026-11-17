@@ -1,0 +1,554 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "enum": [
+        1
+      ]
+    },
+    "strategyId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,47}$",
+      "maxLength": 48
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+[.][0-9]+[.][0-9]+(-[a-zA-Z0-9.-]+)?$",
+      "maxLength": 40
+    },
+    "market": {
+      "enum": [
+        "BINANCE_DEMO_FUTURES"
+      ]
+    },
+    "riskLevel": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ]
+    },
+    "timeframes": {
+      "type": "object",
+      "properties": {
+        "primary": {
+          "enum": [
+            "5m",
+            "15m",
+            "1h"
+          ]
+        },
+        "entry": {
+          "enum": [
+            "5m"
+          ]
+        },
+        "confirmation": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "15m",
+              "1h",
+              "4h"
+            ]
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "pathValidation": {
+          "enum": [
+            "1m"
+          ]
+        }
+      },
+      "required": [
+        "primary",
+        "entry",
+        "confirmation",
+        "pathValidation"
+      ],
+      "additionalProperties": false
+    },
+    "screening": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "enum": [
+            "USDT_PERPETUAL"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "minQuoteVolumeUsdt": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "excludedConditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "minItems": 1,
+          "maxItems": 12,
+          "uniqueItems": false
+        }
+      },
+      "required": [
+        "contract",
+        "limit",
+        "minQuoteVolumeUsdt",
+        "excludedConditions"
+      ],
+      "additionalProperties": false
+    },
+    "indicators": {
+      "type": "object",
+      "properties": {
+        "trendWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "derivativesWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "liquidationWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "positioningWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "liquidityWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "trendWeight",
+        "derivativesWeight",
+        "liquidationWeight",
+        "positioningWeight",
+        "liquidityWeight"
+      ],
+      "additionalProperties": false
+    },
+    "scoring": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "INDEPENDENT_DIRECTION_AND_ENTRY"
+          ]
+        },
+        "minimumDirection": {
+          "type": "integer",
+          "minimum": 80,
+          "maximum": 100
+        },
+        "minimumEntry": {
+          "type": "integer",
+          "minimum": 80,
+          "maximum": 100
+        },
+        "gradeA": {
+          "type": "integer",
+          "minimum": 80,
+          "maximum": 100
+        },
+        "gradeB": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99
+        }
+      },
+      "required": [
+        "method",
+        "minimumDirection",
+        "minimumEntry",
+        "gradeA",
+        "gradeB"
+      ],
+      "additionalProperties": false
+    },
+    "entryRules": {
+      "type": "object",
+      "properties": {
+        "orderType": {
+          "enum": [
+            "LIMIT"
+          ]
+        },
+        "trendAligned": {
+          "enum": [
+            true
+          ]
+        },
+        "structureRequired": {
+          "enum": [
+            true
+          ]
+        },
+        "timingRequired": {
+          "enum": [
+            true
+          ]
+        },
+        "longCondition": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "shortCondition": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "orderType",
+        "trendAligned",
+        "structureRequired",
+        "timingRequired",
+        "longCondition",
+        "shortCondition"
+      ],
+      "additionalProperties": false
+    },
+    "exitRules": {
+      "type": "object",
+      "properties": {
+        "stopRequired": {
+          "enum": [
+            true
+          ]
+        },
+        "takeProfitRequired": {
+          "enum": [
+            true
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "MARK_PRICE",
+            "CONTRACT_PRICE"
+          ]
+        },
+        "invalidation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "stopRequired",
+        "takeProfitRequired",
+        "trigger",
+        "invalidation"
+      ],
+      "additionalProperties": false
+    },
+    "riskManagement": {
+      "type": "object",
+      "properties": {
+        "leverage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "budgetUsdt": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 80
+        },
+        "marginUsdt": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 32
+        },
+        "portfolioLossUsdt": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 2
+        },
+        "singleLossUsdt": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 0.35
+        },
+        "minNetRewardRisk": {
+          "type": "number",
+          "minimum": 1.8,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "leverage",
+        "budgetUsdt",
+        "marginUsdt",
+        "portfolioLossUsdt",
+        "singleLossUsdt",
+        "minNetRewardRisk"
+      ],
+      "additionalProperties": false
+    },
+    "positionManagement": {
+      "type": "object",
+      "properties": {
+        "maxSymbols": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "maxSameDirectionCorrelation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.85
+        }
+      },
+      "required": [
+        "maxSymbols",
+        "maxSameDirectionCorrelation"
+      ],
+      "additionalProperties": false
+    },
+    "anomalyFilters": {
+      "type": "object",
+      "properties": {
+        "dailyBars": {
+          "type": "integer",
+          "minimum": 14,
+          "maximum": 30
+        },
+        "dailyGainPct": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "intradayRangePct": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 400
+        },
+        "cooldownBars": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 30
+        }
+      },
+      "required": [
+        "dailyBars",
+        "dailyGainPct",
+        "intradayRangePct",
+        "cooldownBars"
+      ],
+      "additionalProperties": false
+    },
+    "pathMatch": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "enum": [
+            true,
+            false
+          ]
+        },
+        "mode": {
+          "enum": [
+            "SHADOW"
+          ]
+        },
+        "forecast5mCount": {
+          "enum": [
+            3
+          ]
+        },
+        "forecast1mCount": {
+          "enum": [
+            15
+          ]
+        },
+        "windowMinutes": {
+          "enum": [
+            15
+          ]
+        },
+        "minClosedCandles": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 10
+        },
+        "similarityThreshold": {
+          "type": "number",
+          "minimum": 85,
+          "maximum": 100
+        },
+        "atrTolerance": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 0.5
+        },
+        "invalidations": {
+          "enum": [
+            "HARD_PRICE_AND_CHANNEL"
+          ]
+        },
+        "outperformance": {
+          "enum": [
+            "REVIEW_ONLY"
+          ]
+        },
+        "requireClosedUtcCandles": {
+          "enum": [
+            true
+          ]
+        },
+        "expiry": {
+          "enum": [
+            "FIXED_WINDOW"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "mode",
+        "forecast5mCount",
+        "forecast1mCount",
+        "windowMinutes",
+        "minClosedCandles",
+        "similarityThreshold",
+        "atrTolerance",
+        "invalidations",
+        "outperformance",
+        "requireClosedUtcCandles",
+        "expiry"
+      ],
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "REVIEW_ONLY"
+          ]
+        },
+        "cancelAfterMinutes": {
+          "enum": [
+            45
+          ]
+        },
+        "onStaleData": {
+          "enum": [
+            "WAIT"
+          ]
+        },
+        "onNetworkError": {
+          "enum": [
+            "RECONCILE"
+          ]
+        },
+        "onProtectionFailure": {
+          "enum": [
+            "PAUSE_AND_CANCEL_REMAINDER"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "cancelAfterMinutes",
+        "onStaleData",
+        "onNetworkError",
+        "onProtectionFailure"
+      ],
+      "additionalProperties": false
+    },
+    "dataRequirements": {
+      "type": "object",
+      "properties": {
+        "requiredSources": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "BINANCE_KLINES",
+              "BINANCE_DEMO_ACCOUNT",
+              "BYBIT",
+              "OI_HISTORY",
+              "BLOCKMETRIC",
+              "MARGINPAD"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true
+        },
+        "maxAgeSeconds": {
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 300
+        }
+      },
+      "required": [
+        "requiredSources",
+        "maxAgeSeconds"
+      ],
+      "additionalProperties": false
+    },
+    "featureFlags": {
+      "type": "object",
+      "properties": {
+        "derivativesExperimental": {
+          "enum": [
+            true,
+            false
+          ]
+        },
+        "pathMatchAuto": {
+          "enum": [
+            false
+          ]
+        }
+      },
+      "required": [
+        "derivativesExperimental",
+        "pathMatchAuto"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "strategyId",
+    "version",
+    "market",
+    "riskLevel",
+    "timeframes",
+    "screening",
+    "indicators",
+    "scoring",
+    "entryRules",
+    "exitRules",
+    "riskManagement",
+    "positionManagement",
+    "anomalyFilters",
+    "pathMatch",
+    "execution",
+    "dataRequirements",
+    "featureFlags"
+  ],
+  "additionalProperties": false
+}

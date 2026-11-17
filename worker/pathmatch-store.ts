@@ -1,15 +1,16 @@
+import type { StrategyBinding } from './strategy-center';
 import { Failure } from './exchange';
 import { atr14, match, minute, parsePlan, type Candle, type Plan } from './pathmatch-core';
 
 type Slot={id:string;payload:string;symbol:string;state:string;version:string;created_at:number;expires_at:number;
-  locked_at:number|null;start_at:number|null;atr:number|null;last_check:number|null;deleted_at:number|null;revision:number;result:string|null};
+  locked_at:number|null;start_at:number|null;atr:number|null;last_check:number|null;deleted_at:number|null;revision:number;result:string|null;strategy_id?:string;strategy_version?:string;strategy_hash?:string};
 const active=['ARMED','VALIDATING'];
 const actionId=(id:unknown)=>{
   if(typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))throw new Failure('PATHMATCH_INVALID_ID');
   return id;
 };
-const get=(db:D1Database,id:unknown)=>db.prepare('SELECT * FROM pathmatch_predictions WHERE id=?').bind(actionId(id)).first<Slot>();
-const view=(row:Slot)=>({id:row.id,state:row.state,mode:'SHADOW',symbol:row.symbol,version:row.version,createdAt:row.created_at,
+const get=(db:D1Database,id:unknown)=>db.prepare("SELECT p.*,l.strategy_id,l.version strategy_version,l.content_hash strategy_hash FROM pathmatch_predictions p LEFT JOIN strategy_prediction_links l ON l.prediction_id=p.id WHERE p.id=?").bind(actionId(id)).first<Slot>();
+const view=(row:Slot)=>({strategy:row.strategy_id?{strategyId:row.strategy_id,version:row.strategy_version,contentHash:row.strategy_hash}:null,id:row.id,state:row.state,mode:'SHADOW',symbol:row.symbol,version:row.version,createdAt:row.created_at,
   expiresAt:row.expires_at,lockedAt:row.locked_at,startAt:row.start_at,atr:row.atr,checkedAt:row.last_check,
   plan:JSON.parse(row.payload) as Plan,result:row.result?JSON.parse(row.result):null,execution:'DISABLED_PENDING_INDEPENDENT_ACCEPTANCE'});
 export function pathRelay(ns:DurableObjectNamespace){return ns.get(ns.idFromName('private-market-relay'));}
@@ -42,17 +43,37 @@ export async function predictionReference(relay:DurableObjectStub,symbol:unknown
   return {symbol,exchange:'BINANCE_DEMO',referenceTime:latest.time+minute,referencePrice:latest.close,suggestedStartAt:latest.time+2*minute,asOf:now};
 }
 
-export async function createPrediction(db:D1Database,body:any){
+export async function createPrediction(db:D1Database,body:any,resolveBinding?:()=>Promise<StrategyBinding>){
   const id=actionId(body?.id);
   const previous=await get(db,id);
   if(previous){
     if(previous.deleted_at!==null)throw new Failure('PATHMATCH_ID_RETIRED',409);
+    if(previous.strategy_id&&(body?.strategy?.strategyId!==previous.strategy_id||body?.strategy?.version!==previous.strategy_version||body?.strategy?.contentHash!==previous.strategy_hash))throw new Failure('PATHMATCH_ID_CONFLICT',409);
     if(previous.payload!==JSON.stringify(body?.plan))throw new Failure('PATHMATCH_ID_CONFLICT',409);
     return view(previous);
   }
   const created=Date.now(),plan=parsePlan(body?.plan,created);
   if(plan.forecast.interval!=='1m')throw new Failure('PATHMATCH_15_MINUTE_OHLC_REQUIRED');
-  await db.prepare(`INSERT OR IGNORE INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at)
+  if(resolveBinding){
+    const binding=await resolveBinding(), policy=binding.config.pathMatch;
+    if(!policy.enabled||policy.mode!=='SHADOW'||plan.forecast.candles.length!==policy.forecast1mCount||
+      plan.validation.maximumValidationMinutes!==policy.windowMinutes||plan.validation.minimumClosed1mCandles!==policy.minClosedCandles||
+      plan.validation.similarityThreshold!==policy.similarityThreshold||plan.validation.atrTolerance!==policy.atrTolerance)
+      throw new Failure('PATHMATCH_STRATEGY_POLICY_MISMATCH',409);
+    const [insert]=await db.batch([
+      db.prepare(`INSERT OR IGNORE INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at)
+        SELECT ?,?,?,?,'DRAFT',?,? FROM strategy_active WHERE strategy_id=? AND version=? AND generation=?`)
+        .bind(id,JSON.stringify(plan),plan.symbol,plan.strategyVersion,created,plan.expiresAt,binding.strategyId,binding.version,binding.generation),
+      db.prepare(`INSERT INTO strategy_prediction_links(prediction_id,strategy_id,version,content_hash)
+        SELECT ?,?,?,? WHERE changes()=1`).bind(id,binding.strategyId,binding.version,binding.contentHash)
+    ]);
+    if(!insert.meta.changes){
+      const replay=await get(db,id);
+      if(!replay)throw new Failure('STRATEGY_CHANGED_OR_UNBOUND',409);
+      if(replay.strategy_id!==binding.strategyId||replay.strategy_version!==binding.version||replay.strategy_hash!==binding.contentHash)
+        throw new Failure('PATHMATCH_ID_CONFLICT',409);
+    }
+  }else await db.prepare(`INSERT OR IGNORE INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at)
     VALUES(?,?,?,?,'DRAFT',?,?)`).bind(id,JSON.stringify(plan),plan.symbol,plan.strategyVersion,created,plan.expiresAt).run();
   const stored=await get(db,id);
   if(stored?.deleted_at!=null)throw new Failure('PATHMATCH_ID_RETIRED',409);
@@ -126,21 +147,21 @@ export async function deletePrediction(db:D1Database,body:any){
 }
 
 export async function predictionHistory(db:D1Database,query:URLSearchParams){
-  const clauses:string[]=['deleted_at IS NULL'],values:(number|string)[]=[];
+  const clauses:string[]=['p.deleted_at IS NULL'],values:(number|string)[]=[];
   for(const [key,column] of [['symbol','symbol'],['state','state'],['version','version']]){
     const value=query.get(key);
     if(value){if(!/^[A-Za-z0-9._-]{1,30}$/.test(value))throw new Failure('PATHMATCH_INVALID_FILTER');
-      clauses.push(column+'=?');values.push(value);}
+      clauses.push('p.'+column+'=?');values.push(value);}
   }
   for(const [key,op] of [['from','>='],['to','<=']]){
     const value=query.get(key);
     if(value!==null){if(!/^\d{10,14}$/.test(value))throw new Failure('PATHMATCH_INVALID_FILTER');
-      clauses.push('created_at'+op+'?');values.push(Number(value));}
+      clauses.push('p.created_at'+op+'?');values.push(Number(value));}
   }
   const limit=Number(query.get('limit')??20);
   if(!Number.isInteger(limit)||limit<1||limit>50)throw new Failure('PATHMATCH_INVALID_FILTER');
-  const rows=await db.prepare('SELECT * FROM pathmatch_predictions'+(clauses.length?' WHERE '+clauses.join(' AND '):'')+
-    ' ORDER BY created_at DESC,id DESC LIMIT ?').bind(...values,limit).all<Slot>();
+  const rows=await db.prepare('SELECT p.*,l.strategy_id,l.version strategy_version,l.content_hash strategy_hash FROM pathmatch_predictions p LEFT JOIN strategy_prediction_links l ON l.prediction_id=p.id'+(clauses.length?' WHERE '+clauses.join(' AND '):'')+
+    ' ORDER BY p.created_at DESC,p.id DESC LIMIT ?').bind(...values,limit).all<Slot>();
   return rows.results.map(view);
 }
 

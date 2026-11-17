@@ -1,0 +1,26 @@
+.strategy-center {color:#294940;display:grid;gap:16px;margin-top:16px;}
+.strategy-layout {display:grid;grid-template-columns:minmax(210px,270px) minmax(0,1fr);gap:16px;align-items:start;}
+.strategy-center h2 {display:flex;align-items:center;gap:8px;}
+.strategy-center .panel {min-width:0;}
+.strategy-content {padding:16px 22px 20px;overflow-wrap:anywhere;}
+.strategy-content p {margin:.35em 0 .85em;}
+.strategy-content h3 {margin:0 0 .6em;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.strategy-active {background:linear-gradient(115deg,#f5f8f1,#d8e8df);}
+.strategy-library,.strategy-detail,.strategy-form,.strategy-form label {display:grid;gap:10px;}
+.strategy-record {text-align:left;display:grid;gap:4px;justify-content:stretch;}
+.strategy-record small {display:block;}
+.strategy-record[aria-pressed=true] {background:#d7e6d7;border-color:#7f9e88;}
+.strategy-facts,.strategy-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;}
+.strategy-facts dt {color:#536e63;font-size:.88em;}
+.strategy-facts dd {margin:3px 0 0;}
+.strategy-center select,.strategy-center input,.strategy-center textarea {width:100%;min-width:0;color:inherit;background:#fbfcf9;border:1px solid #aebfb8;border-radius:8px;padding:8px;font:inherit;}
+.strategy-center pre,.strategy-center textarea {max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,monospace;}
+.strategy-center pre {max-height:28rem;overflow:auto;}
+.strategy-document {white-space:pre-wrap;}
+.strategy-excerpt {white-space:pre-wrap;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
+.strategy-hash {font-size:.86rem;display:block;word-break:break-all;}
+.strategy-center details {border-top:1px solid #dce6dd;padding:8px 0;}
+.strategy-center summary {cursor:pointer;}
+.strategy-center summary svg {vertical-align:middle;margin-right:4px;}
+.strategy-actions {margin:12px 0;flex-wrap:wrap;}
+@media(max-width:720px) {.strategy-layout,.strategy-fields {grid-template-columns:minmax(0,1fr);} .strategy-content {padding:12px 14px;} .strategy-center .panelhead {flex-wrap:wrap;} }

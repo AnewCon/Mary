@@ -1,3 +1,4 @@
+import { activeBinding, manageStrategy, readStrategy } from './strategy-center';
 import { armPrediction, cancelPrediction, createPrediction, deletePrediction, monitorPredictions, pathRelay, predictionHistory, predictionReference, predictionStatus } from './pathmatch-store';
 import { analyzeMarket } from './market-analyze';
 import { ingestOI, pruneOI } from './oi-history';
@@ -17,7 +18,7 @@ import {performance,history,syncPerformance,resetTodayEarnings} from './performa
 interface Env extends BinanceDemoEnv {MARKET_VPS_TOKEN?:string;OI_INTERVAL_MINUTES?:string;OI_RETENTION_DAYS?:string;MARKET_SIGNAL_CONFIG?:string;MARKET_CACHE_TTLS?:string;MARKET_RELAY:DurableObjectNamespace;BINANCE_LIVE_DESKTOP_TOKEN?:string;DB:D1Database;ASSETS:Fetcher;ADMIN_PASSWORD:string;SESSION_SECRET:string;OKX_API_KEY:string;OKX_SECRET_KEY:string;OKX_PASSPHRASE:string;TRADING_MODE:string;DEMO_TRADING_ENABLED?:string;MCP_DEMO_TRADING_ENABLED?:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(status<400?{ok:true,data}:{ok:false,error:{code:data}}),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const now=()=>new Date().toISOString();
-async function body(r:Request){const text=await r.text();if(new TextEncoder().encode(text).length>16384)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
+async function body(r:Request,maxBytes=16384){const text=await r.text();if(new TextEncoder().encode(text).length>maxBytes)throw new Failure('REQUEST_TOO_LARGE',413);try{return JSON.parse(text)}catch{throw new Failure('INVALID_JSON')}}
 async function limit(e:Env,key:string,max:number){const bucket=Math.floor(Date.now()/60000);const row=await e.DB.prepare('INSERT INTO rate_limits(key,bucket,count) VALUES(?,?,1) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN bucket=excluded.bucket THEN count+1 ELSE 1 END,bucket=excluded.bucket RETURNING count').bind(key,bucket).first<{count:number}>();if(row!.count>max)throw new Failure('RATE_LIMITED',429)}
 async function auth(r:Request,e:Env,scope='read',sessionOnly=false){const cookie=r.headers.get('Cookie')?.match(/(?:^|; )quantos=([^;]+)/)?.[1];if(cookie){const s=await e.DB.prepare('SELECT expires FROM sessions WHERE hash=?').bind(await hash(cookie)).first<{expires:number}>();if(s&&s.expires>Date.now())return 'session'}if(!sessionOnly){const token=r.headers.get('Authorization')?.replace(/^Bearer /,'');if(token){const k=await e.DB.prepare('SELECT * FROM api_keys WHERE hash=? AND revoked=0').bind(await hash(token)).first<any>();if(k&&scopeAllowed(JSON.parse(k.scopes),scope)){await limit(e,'key:'+k.id,60);await e.DB.prepare('UPDATE api_keys SET last_used_at=? WHERE id=?').bind(now(),k.id).run();return k.id}}}throw new Failure('UNAUTHORIZED',401)}
 async function sync(e:Env){const lease=await e.DB.prepare("INSERT INTO system_settings(key,value) VALUES('sync_lock',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(value AS INTEGER)<? RETURNING value").bind(String(Date.now()),Date.now()-30000).first();if(!lease)throw new Failure('SYNC_IN_PROGRESS',409);try{const [balances,positions]=await Promise.all([okx(e,'/api/v5/account/balance'),okx(e,'/api/v5/account/positions?instType=SWAP')]);const a=balances[0];const data={account:{equity:a.totalEq,currency:'USD',details:a.details,source:'OKX API'},positions:positions.filter((p:any)=>Number(p.pos)!==0),updatedAt:now()};await e.DB.batch([e.DB.prepare('INSERT OR REPLACE INTO account_snapshots VALUES(1,?,?)').bind(JSON.stringify(data),data.updatedAt),e.DB.prepare('DELETE FROM positions'),...data.positions.map((p:any)=>e.DB.prepare('INSERT INTO positions VALUES(?,?)').bind(p.posId,JSON.stringify(p))),e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,NULL)').bind(now())]);return data}catch(err){const code=err instanceof Failure?err.code:'SYNC_NETWORK_FAILURE';await e.DB.prepare('INSERT INTO sync_logs(created_at,error) VALUES(?,?)').bind(now(),code).run();throw new Failure(code,503)}finally{await e.DB.prepare("DELETE FROM system_settings WHERE key='sync_lock'").run()}}
@@ -48,6 +49,12 @@ if(p==='/api/market/analyze'&&m==='POST'){
   await limit(e,'market-analysis:'+principal,16);
   return json(await analyzeMarket(e.DB,await body(r),c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay')),oiInterval,e.MARKET_SIGNAL_CONFIG,e.MARKET_CACHE_TTLS));
 }
+if(p.startsWith('/api/strategies/')){
+  const op=p.split('/').at(-1)!;
+  if(m==='GET'){await auth(r,e);return json(await readStrategy(e.DB,op,u.searchParams,'strategy-center-v1.0'));}
+  if(m==='POST'){const actor=await auth(r,e,'write',true);await limit(e,'strategy-write:'+actor,20);return json(await manageStrategy(e.DB,op,await body(r,49152)));}
+  throw new Failure('NOT_FOUND',404);
+}
 if(p.startsWith('/api/predictions/')){
   const op=p.split('/').at(-1);
   const principal=await auth(r,e,m==='POST'?'write':'read',op==='delete');
@@ -57,7 +64,7 @@ if(p.startsWith('/api/predictions/')){
   if(m==='POST'){
     await limit(e,'pathmatch:'+principal,12);
     const data=await body(r);
-    if(op==='create')return json(await createPrediction(e.DB,data));
+    if(op==='create')return json(await createPrediction(e.DB,data,()=>activeBinding(e.DB,data.strategy)));
     if(op==='arm')return json(await armPrediction(e.DB,pathRelay(e.MARKET_RELAY),data));
     if(op==='cancel')return json(await cancelPrediction(e.DB,data));
     if(op==='delete')return json(await deletePrediction(e.DB,data));
@@ -118,7 +125,7 @@ if(p.startsWith('/api/binance-demo/')){
     throw new Failure('NOT_FOUND',404);
   }
   const query=m==='POST'&&p.endsWith('/query');
-  await auth(r,e,write?'demo_trade':'read',m==='POST'&&!write&&!query);
+  const demoActor=await auth(r,e,write?'demo_trade':'read',m==='POST'&&!write&&!query);
   const enabled=Boolean(e.BINANCE_DEMO_RELAY_TOKEN);
   const tradingEnabled=enabled&&e.MCP_DEMO_TRADING_ENABLED==='true';
   if(p.endsWith('/status')&&m==='GET')return json({enabled});
@@ -140,7 +147,15 @@ if(p.startsWith('/api/binance-demo/')){
   if(query){const input=await body(r);if(!['orders','contract','query'].includes(input?.kind))throw new Failure('INVALID_DEMO_QUERY');await limit(e,'binance-demo-query',15);return json(await enqueueDemo(e.DB,input))}
   if(p.endsWith('/limits')&&m==='GET')return json(await listDemoLimits(e.DB));
   if(p.endsWith('/action')&&m==='GET')return json(await queuedDemoStatus(e.DB,u.searchParams.get('id')));
-  if(tradingEnabled&&write){await limit(e,'binance-demo-action',8);return json(await enqueueDemo(e.DB,await body(r)))}
+  if(tradingEnabled&&write){
+    await limit(e,'binance-demo-action',8);
+    const input=await body(r);
+    if(demoActor!=='session'&&['open','limit','bracket'].includes(input?.kind)){
+      await activeBinding(e.DB,input.strategy);
+      throw new Failure('STRATEGY_EXECUTION_NOT_ACCEPTED',409);
+    }
+    return json(await enqueueDemo(e.DB,input));
+  }
   throw new Failure('NOT_FOUND',404);
 }
 const admin=p.startsWith('/api/keys')||p.startsWith('/api/trades/')||p==='/api/system/halt'||p==='/api/logout'||p==='/api/performance/today/reset'||p==='/api/settings/capital';const principal=await auth(r,e,p.startsWith('/api/demo/')?'demo_trade':m==='GET'?'read':'write',admin);

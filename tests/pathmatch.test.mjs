@@ -50,7 +50,7 @@ const {DatabaseSync}=await import('node:sqlite');
 const {readFileSync}=await import('node:fs');
 function db(){
  const sqlite=new DatabaseSync(':memory:');
- for(const migration of ['0010_pathmatch.sql','0011_pathmatch_deleted_at.sql']){
+ for(const migration of ['0010_pathmatch.sql','0011_pathmatch_deleted_at.sql','0012_strategy_center.sql']){
   sqlite.exec(readFileSync('migrations/'+migration,'utf8'));
  }
  return {prepare(sql){return {all:()=>({results:sqlite.prepare(sql).all()}),bind(...args){return {
@@ -160,3 +160,4 @@ test('deletion hides a prediction, stops observation and preserves its audit dat
  await monitorPredictions(database,relay(start+4*M,()=>calls++),start+4*M);
  assert.equal(calls,0);
 });
+
