@@ -5,7 +5,7 @@ export type GridMarket={symbol:string;interval:string;step:number;requestedFrom:
 export type Breakout='CLOSE'|'HOLD'|'PAUSE';
 export type Side='LONG'|'SHORT';
 export type GridConfig={
- lower:number;upper:number;count:number;spacing:'LINEAR'|'GEOMETRIC';direction:Side|'NEUTRAL';capital:number;leverage:number;
+ lower:number;upper:number;upperAngle?:number;lowerAngle?:number;count:number;spacing:'LINEAR'|'GEOMETRIC';direction:Side|'NEUTRAL';capital:number;leverage:number;
  size:number;sizeMode:'MARGIN'|'QUANTITY';maxPositions:number;up:Breakout;down:Breakout;stopUpper:number;stopLower:number;
  maxLoss:number;drawdown:number;trailing:number;disableOnBreak:boolean;maker:number;taker:number;slippage:number;
  maintenance:number;fundingMode:'HISTORY'|'FIXED'|'OFF';fundingRate:number;
@@ -33,6 +33,17 @@ export function gridLevels(c:Pick<GridConfig,'lower'|'upper'|'count'|'spacing'>,
  return prices;
 }
 
+export function channelBox(c:Pick<GridConfig,'lower'|'upper'|'upperAngle'|'lowerAngle'>,progress:number){
+ const height=c.upper-c.lower;
+ const shift=(angle:number)=>Math.tan(angle*Math.PI/180)*height*Math.min(1,Math.max(0,progress));
+ const upperAngle=c.upperAngle??0,lowerAngle=c.lowerAngle??0;
+ if(![upperAngle,lowerAngle].every(x=>Number.isFinite(x)&&Math.abs(x)<=80))throw Error('角度须在 -80° 到 80° 之间。');
+ return {lower:c.lower+shift(lowerAngle),upper:c.upper+shift(upperAngle)};
+}
+export function channelLevels(c:GridConfig,rules:Rules,progress:number){
+ return gridLevels({...c,...channelBox(c,progress)},rules);
+}
+
 type Open={id:number;slot:number;side:Side;qty:number;entry:number;openedAt:number;margin:number;openFee:number;funding:number;best:number;bar:number};
 export type Trade=Omit<Open,'best'|'bar'>&{exit:number;closedAt:number;closeFee:number;fees:number;gross:number;net:number;reason:string};
 export type GridEvent={time:number;price:number;kind:'OPEN'|'CLOSE'|'BREAKOUT'|'STOP';side?:Side;id?:number;net?:number;reason?:string};
@@ -40,16 +51,19 @@ export type Frame={time:number;price:number;equity:number;available:number;margi
  fees:number;funding:number;drawdown:number;open:Open[];done:number;wins:number;events:GridEvent[];state:string};
 
 export function simulateGrid(market:GridMarket,c:GridConfig){
- const {candles,rules,step}=market,levels=gridLevels(c,rules);
+ const {candles,rules,step}=market,initialLevels=gridLevels(c,rules);
  const acceptable=(v:number,min:number,max:number)=>Number.isFinite(v)&&v>=min&&v<=max;
  if(!candles.length||![c.capital,c.size].every(x=>acceptable(x,0.00000001,1e9))||!Number.isInteger(c.leverage)||
   !acceptable(c.leverage,1,125)||!Number.isInteger(c.maxPositions)||!acceptable(c.maxPositions,1,100)||
   ![c.maker,c.taker,c.slippage,c.maintenance].every(v=>acceptable(v,0,10))||
   ![c.drawdown,c.trailing].every(v=>acceptable(v,0,100))||!acceptable(c.maxLoss,0,1e9)||
   !acceptable(c.fundingRate,-10,10))throw Error('请检查资金、杠杆、费率及风控参数。');
- const low=levels[0],high=levels[levels.length-1];
+ const endpoint=channelLevels(c,rules,1);
+ const minBoundary=Math.min(initialLevels[0],endpoint[0]),maxBoundary=Math.max(initialLevels.at(-1)!,endpoint.at(-1)!);
+ const isTilted=!!(c.upperAngle||c.lowerAngle);
+ const barLevels=isTilted?candles.map(b=>channelLevels(c,rules,(b.time-market.from)/(market.to-market.from))):null;
  const minStop=c.stopLower?units(c.stopLower,rules.tick):0,maxStop=c.stopUpper?units(c.stopUpper,rules.tick):0;
- if((c.stopLower&&!(minStop>=rules.minPrice&&minStop>0&&minStop<low))||(c.stopUpper&&!(maxStop>high&&maxStop<=rules.maxPrice)))
+ if((c.stopLower&&!(minStop>=rules.minPrice&&minStop>0&&minStop<minBoundary))||(c.stopUpper&&!(maxStop>maxBoundary&&maxStop<=rules.maxPrice)))
   throw Error('硬止损应位于箱体外，且满足合约价格范围。');
  if(c.fundingMode==='HISTORY'&&!market.funding)throw Error('历史资金费率缺失。可改用自定义或关闭后重新模拟。');
 
@@ -75,6 +89,8 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
  };
  for(const [index,b] of candles.entries()){
   if(state==='HALTED'||state==='PAUSED')break;
+  const levels=barLevels?.[index]??initialLevels;
+  const low=levels[0],high=levels.at(-1)!;
   const events:GridEvent[]=[];
   const previous=candles[index-1]?.close??b.open;
   while(funding[settlement]&&funding[settlement].time<b.time+step){
@@ -137,7 +153,7 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
      const possible:{slot:number;side:Side;entry:number}[]=[];
      for(let slot=0;slot<levels.length-1;slot++){
       const [lower,upper]=levels.slice(slot,slot+2);
-      const neutralSide=upper<=pivot?'LONG':lower>=pivot?'SHORT':null;
+      const neutralSide=initialLevels[slot+1]<=pivot?'LONG':initialLevels[slot]>=pivot?'SHORT':null;
       const side=c.direction==='NEUTRAL'?neutralSide:c.direction;
       if(!side||positions.has(slot)||closedThisBar.has(slot))continue;
       const entry=side==='LONG'?lower:upper;

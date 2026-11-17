@@ -11,14 +11,14 @@ function segmentDistance(x:number,y:number,x1:number,y1:number,x2:number,y2:numb
  return Math.hypot(x-(x1+dx*fraction),y-(y1+dy*fraction));
 }
 type Props={bars:Candle[];tick:string;step:number;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
- tool:'PAN'|'LINE'|'BOX'|'SEGMENT';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;onSegment:(segment:Segment)=>void;
- onDrag:(which:'upper'|'lower',price:number,commit:boolean)=>void};
+ tool:'PAN'|'LINE'|'BOX'|'SEGMENT'|'ANGLE';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;onSegment:(segment:Segment)=>void;
+ onDrag:(which:'upper'|'lower',price:number,commit:boolean,angleTime?:number)=>void; angled:boolean; levelsAt?:(time:number)=>number[]};
 const axisTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export const fullTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export default function GridChart(p:Props){
  const canvas=useRef<HTMLCanvasElement>(null);
  const geom=useRef<{left:number;right:number;top:number;bottom:number;index:(x:number)=>number;price:(y:number)=>number;y:(price:number)=>number;timeAt:(x:number)=>number;timeX:(time:number)=>number}|null>(null);
- const drag=useRef<{which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;moving?:boolean;segment?:DrawingPoint}|null>(null);
+ const drag=useRef<{which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;angleTime?:number;moving?:boolean;segment?:DrawingPoint}|null>(null);
  const [size,setSize]=useState({width:0,height:0});
  const [zoom,setZoom]=useState(110),[offset,setOffset]=useState(0);
  const [preview,setPreview]=useState<Segment|null>(null);
@@ -47,7 +47,8 @@ export default function GridChart(p:Props){
   if(!viewed.length){geom.current=null;return;}
   const right=width-81,left=10,top=19,bottom=height-91,volumeBottom=height-23;
   const visible=Math.max(viewed.length,8),dx=(right-left)/visible;
-  const prices=[...viewed.flatMap(b=>[b.low,b.high]),...p.levels];
+  const gridByBar=p.levelsAt?viewed.map(bar=>p.levelsAt!(bar.time)):null;
+  const prices=[...viewed.flatMap(b=>[b.low,b.high]),...(gridByBar?gridByBar.flat():p.levels)];
   const lower=Math.min(...prices),upper=Math.max(...prices);
   const pad=(upper-lower||upper*.002)*.075;
   const min=lower-pad,max=upper+pad;
@@ -92,7 +93,19 @@ export default function GridChart(p:Props){
    ctx.setLineDash([]);ctx.lineWidth=1;
   };
   const newest=p.frame?.events??[];
-  p.levels.forEach((level,i)=>mark(level,i===0?'#67ce9e':i===p.levels.length-1?'#ed8791':'#719caf',
+  if(gridByBar&&gridByBar.length>1){
+   ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();
+   const latest=gridByBar[gridByBar.length-1];
+   for(let i=0;i<latest.length;i++){
+    const outer=i===0||i===latest.length-1;
+    ctx.strokeStyle=i===0?'#67ce9e':i===latest.length-1?'#ed8791':'#719caf';
+    ctx.lineWidth=newest.some(e=>e.kind==='OPEN'&&e.price===latest[i])?2:1;
+    ctx.setLineDash(outer?[]:[3,4]);ctx.beginPath();
+    gridByBar.forEach((levels,index)=>{if(index===0)ctx.moveTo(x(index),y(levels[i]));else ctx.lineTo(x(index),y(levels[i]));});
+    ctx.stroke();
+   }
+   ctx.restore();
+  }else p.levels.forEach((level,i)=>mark(level,i===0?'#67ce9e':i===p.levels.length-1?'#ed8791':'#719caf',
    i===0||i===p.levels.length-1?[]:[3,4],newest.some(e=>e.kind==='OPEN'&&e.price===level)));
   p.stops.forEach(v=>{if(v>0)mark(v,'#edaf68',[5,4]);});
   ctx.save();
@@ -167,7 +180,7 @@ export default function GridChart(p:Props){
   }
   if(d.which){
    d.price=(d.toPrice??g.price)(Math.min(g.bottom,Math.max(g.top,pos.y)));
-   d.moving=true;p.onDrag(d.which,d.price,false);
+   d.moving=true;p.onDrag(d.which,d.price,false,d.angleTime);
   }else if(p.tool==='PAN'){
    const delta=pos.x-d.x;
    if(Math.abs(delta)>4)d.moving=true;
@@ -184,10 +197,13 @@ export default function GridChart(p:Props){
    e.currentTarget.setPointerCapture(e.pointerId);
    return;
   }
-  const upper=p.levels.at(-1),lower=p.levels[0];
-  const which=p.tool==='PAN'&&!p.locked&&upper&&Math.abs(pos.y-g.y(upper))<8?'upper':
-   p.tool==='PAN'&&!p.locked&&lower&&Math.abs(pos.y-g.y(lower))<8?'lower':undefined;
-  drag.current={x:pos.x,end:offset,which,toPrice:g.price};
+  const at=viewed[g.index(pos.x)]?.time;
+  const levels=(p.levelsAt&&at!==undefined?p.levelsAt(at):p.levels);
+  const upper=levels.at(-1),lower=levels[0];
+  const canDrag=!p.locked&&(p.tool==='ANGLE'||p.tool==='PAN'&&!p.angled);
+  const which=canDrag&&upper&&Math.abs(pos.y-g.y(upper))<9?'upper':
+   canDrag&&lower&&Math.abs(pos.y-g.y(lower))<9?'lower':undefined;
+  drag.current={x:pos.x,end:offset,which,toPrice:g.price,angleTime:p.tool==='ANGLE'?at:undefined};
   e.currentTarget.setPointerCapture(e.pointerId);
  }
  function up(e:ReactPointerEvent<HTMLCanvasElement>){
@@ -201,9 +217,9 @@ export default function GridChart(p:Props){
     p.onSegment({start:d.segment,end});
    return;
   }
-  if(d.which&&d.moving&&d.price!==undefined){p.onDrag(d.which,d.price,true);return;}
+  if(d.which&&d.moving&&d.price!==undefined){p.onDrag(d.which,d.price,true,d.angleTime);return;}
   if(d.moving||pos.y<g.top||pos.y>g.bottom)return;
-  if(p.tool!=='PAN'&&!p.locked){p.onPrice(g.price(pos.y));return;}
+  if((p.tool==='LINE'||p.tool==='BOX')&&!p.locked){p.onPrice(g.price(pos.y));return;}
   const line=[...p.lines].reverse().find(l=>'price' in l?Math.abs(pos.y-g.y(l.price))<8:
    segmentDistance(pos.x,pos.y,g.timeX(l.start.time),g.y(l.start.price),g.timeX(l.end.time),g.y(l.end.price))<8);
   p.onSelect(line?.id??0);
@@ -216,7 +232,7 @@ export default function GridChart(p:Props){
    <span>量 {candle.volume.toLocaleString('zh-CN',{maximumFractionDigits:2})}</span></div>}
   <canvas aria-label="历史蜡烛图与成交量" ref={canvas} className={'grid-chart grid-tool-'+p.tool.toLowerCase()}
    onPointerMove={move} onPointerDown={down} onPointerUp={up} onPointerLeave={()=>setCursor(null)}
-   onPointerCancel={()=>{if(drag.current?.which&&drag.current.price!==undefined)p.onDrag(drag.current.which,drag.current.price,true);drag.current=null;setPreview(null);}}/>
+   onPointerCancel={()=>{if(drag.current?.which&&drag.current.price!==undefined)p.onDrag(drag.current.which,drag.current.price,true,drag.current.angleTime);drag.current=null;setPreview(null);}}/>
   {offset>0&&<button className="grid-return-chart" type="button" onClick={()=>setOffset(0)}>回到最新</button>}
  </div>;
 }

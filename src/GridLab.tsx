@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChartCandlestick, Download, Lock, Unlock, Play, Pause, RotateCcw, Save, FolderOpen, SkipBack, SkipForward, Undo2, Redo2 } from 'lucide-react';
 import GridChart, { fullTime, type Drawing, type DrawingPoint } from './GridChart';
-import { defaults, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
+import { defaults, channelLevels, channelBox, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
 import './grid-lab.css';
 
 type Api=(path:string)=>Promise<any>;
 type Range={preset:string;from:string;to:string};
-type DrawingState={lower:number;upper:number;lines:Drawing[]};
+type DrawingState={lower:number;upper:number;upperAngle?:number;lowerAngle?:number;lines:Drawing[]};
 type Scenario={schema:1;symbol:string;interval:string;range:Range;config:GridConfig;drawings:DrawingState;market:GridMarket;simulation?:GridMarket;result?:GridResult};
 const day=86400000;
 const nowInput=(time:number)=>new Date(time+8*3600000).toISOString().slice(0,16);
@@ -85,7 +85,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  const [config,setConfig]=useState<GridConfig>(defaults),[simulation,setSimulation]=useState<GridMarket|null>(null);
  const [result,setResult]=useState<GridResult|null>(null),[cursor,setCursor]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(10);
  const [drawings,setDrawings]=useState(initialDrawings),[undo,setUndo]=useState<DrawingState[]>([]),[redo,setRedo]=useState<DrawingState[]>([]);
- const [selected,setSelected]=useState<number|null>(null),[tool,setTool]=useState<'PAN'|'LINE'|'BOX'|'SEGMENT'>('PAN');
+ const [selected,setSelected]=useState<number|null>(null),[tool,setTool]=useState<'PAN'|'LINE'|'BOX'|'SEGMENT'|'ANGLE'>('PAN');
  const [anchor,setAnchor]=useState<number|null>(null),[locked,setLocked]=useState(false),[precise,setPrecise]=useState(true);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dark,setDark]=useState(true);
  const [saved,setSaved]=useState(false);
@@ -100,10 +100,25 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
   const first=bars[0],last=bars.at(-1)!;
   return {last:last.close,change:(last.close/first.open-1)*100,high:Math.max(...bars.map(b=>b.high)),low:Math.min(...bars.map(b=>b.low)),vol:bars.reduce((n,b)=>n+b.volume,0)};
  },[market,result,simulation,cursor]);
- const params={...config,lower:drawings.lower,upper:drawings.upper};
+ const params={...config,lower:drawings.lower,upper:drawings.upper,upperAngle:drawings.upperAngle??0,lowerAngle:drawings.lowerAngle??0};
+ const angled=!!(params.upperAngle||params.lowerAngle);
  const levels=useMemo(()=>{
   try{return market?gridLevels({...config,lower:drawings.lower,upper:drawings.upper},market.rules):[];}catch{return [];}
  },[config,drawings.lower,drawings.upper,market]);
+ const channelMarket=simulation??market;
+ const levelsAt=(time:number)=>{
+  if(!channelMarket)return levels;
+  const progress=(time-channelMarket.from)/(channelMarket.to-channelMarket.from);
+  try{return channelLevels(params,channelMarket.rules,progress);}catch{
+   const boundary=channelBox(params,progress);
+   return levels.map((_,index)=>boundary.lower+(boundary.upper-boundary.lower)*index/(levels.length-1));
+  }
+ };
+ let channelError='';
+ if(angled&&market&&levels.length){
+  try{channelLevels(params,market.rules,1);}
+  catch(err){channelError='箱体末端无效：'+explain(err);}
+ }
  const replaceDrawings=(next:DrawingState,prior=drawings)=>{
   if(next===prior)return;
   setUndo(history=>[...history.slice(-29),prior]);setRedo([]);setDrawings(next);
@@ -115,8 +130,24 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
   setConfig(previous=>({...previous,[key]:value}));
   if(result)clearSimulation();
  }
- function box(which:'upper'|'lower',value:number,commit=true){
+ function angle(which:'upper'|'lower',value:number,commit=true){
   if(!market||locked||result||busy)return;
+  const key=which==='upper'?'upperAngle':'lowerAngle';
+  const degrees=Math.max(-80,Math.min(80,Math.round(value*10)/10));
+  const next={...drawings,[key]:degrees};
+  if(commit){
+   replaceDrawings(next,dragStart.current??drawings);dragStart.current=null;
+  }else{if(!dragStart.current)dragStart.current=drawings;setDrawings(next);}
+ }
+ function box(which:'upper'|'lower',value:number,commit=true,angleTime?:number){
+  if(!market||locked||result||busy)return;
+  if(angleTime!==undefined){
+   const fraction=(angleTime-market.from)/(market.to-market.from);
+   if(fraction<=0.005||drawings.upper<=drawings.lower)return;
+   const degrees=Math.atan((value-drawings[which])/((drawings.upper-drawings.lower)*fraction))*180/Math.PI;
+   angle(which,degrees,commit);
+   return;
+  }
   const price=value>0?snapPrice(value,market.rules):0,other=which==='upper'?drawings.lower:drawings.upper;
   const bounded=other&&price&&which==='upper'?Math.max(other+Number(market.rules.tick),price):
    other&&price?Math.max(Number(market.rules.tick),Math.min(other-Number(market.rules.tick),price)):price;
@@ -140,8 +171,9 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
    const id=lineId.current++;replaceDrawings({...drawings,lines:[...drawings.lines,{id,price:value}]});setSelected(id);setTool('PAN');
   }else if(anchor===null)setAnchor(value);
   else{
-   if(value===anchor){setError('上下限至少相隔一个价格档。');return;}
-   replaceDrawings({...drawings,lower:Math.min(anchor,value),upper:Math.max(anchor,value)});setAnchor(null);setTool('PAN');setError('');
+   if(tool!=='BOX')return;
+  if(value===anchor){setError('上下限至少相隔一个价格档。');return;}
+   replaceDrawings({...drawings,lower:Math.min(anchor,value),upper:Math.max(anchor,value),upperAngle:0,lowerAngle:0});setAnchor(null);setTool('PAN');setError('');
   }
  }
  const path=(pair:string,period:Range,cycle:string,funding=false)=>'/grid/market?'+new URLSearchParams({
@@ -174,6 +206,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
   setBusy(true);setError('');setNotice('');setPlaying(false);
   try{
    gridLevels(params,market.rules);
+   channelLevels(params,market.rules,1);
    const wantFunding=config.fundingMode==='HISTORY';
    let source:GridMarket;
    const actualRange={...range,from:nowInput(market.from),to:nowInput(market.to)};
@@ -269,6 +302,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <button type="button" disabled={locked||!!result} aria-pressed={tool==='BOX'} onClick={()=>{setTool('BOX');setAnchor(null);}}>绘制网格箱体</button>
        <button type="button" disabled={locked||!!result} aria-pressed={tool==='LINE'} onClick={()=>{setTool('LINE');setAnchor(null);}}>画水平线</button>
        <button type="button" disabled={locked||!!result} aria-pressed={tool==='SEGMENT'} onClick={()=>{setTool('SEGMENT');setAnchor(null);}}>拉直线</button>
+       <button type="button" disabled={locked||!!result||!levels.length} aria-pressed={tool==='ANGLE'} onClick={()=>{setTool('ANGLE');setAnchor(null);}}>拖斜箱体</button>
        <button type="button" disabled={locked||!!result||!selected} onClick={()=>{replaceDrawings({...drawings,lines:drawings.lines.filter(l=>l.id!==selected)});setSelected(null);}}>删除选中</button>
        <button type="button" disabled={locked||!!result} onClick={()=>{replaceDrawings(initialDrawings);setSelected(null);setAnchor(null);}}>清除绘图</button>
        <button type="button" aria-label="撤销" disabled={locked||!!result||!undo.length} onClick={()=>{setRedo([...redo,drawings]);setDrawings(undo.at(-1)!);setUndo(undo.slice(0,-1));setSelected(null);}}><Undo2 size={15}/></button>
@@ -276,8 +310,9 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <button type="button" aria-pressed={locked} onClick={()=>{setLocked(v=>!v);setTool('PAN');setAnchor(null);}}>{locked?<Lock size={15}/>:<Unlock size={15}/>} {locked?'解锁':'锁定'}</button>
       </div>
       {tool==='BOX'&&<p className="grid-draw-hint">{anchor===null?'点击图表确定第一条边界。':'点击确定第二条边界。'}</p>}
+      {tool==='ANGLE'&&<p className="grid-draw-hint">按住红色上沿或绿色下沿的后段，上下拖动调整角度。</p>}
       {tool==='SEGMENT'&&<p className="grid-draw-hint">从起点按住拖到终点，松开确定。按住 Shift 可画水平线。</p>}
-      <GridChart key={market.symbol+market.interval+market.from+(result?'replay':'history')} bars={displayBars} tick={market.rules.tick} step={simulation?.step??market.step} levels={levels}
+      <GridChart key={market.symbol+market.interval+market.from+(result?'replay':'history')} bars={displayBars} tick={market.rules.tick} step={simulation?.step??market.step} levels={levels} angled={angled} levelsAt={angled&&levels.length?levelsAt:undefined}
        stops={[config.stopLower,config.stopUpper]} lines={drawings.lines} selected={selected} locked={locked||!!result}
        tool={result?'PAN':tool} anchor={anchor} frame={frame} frames={visibleFrames} onPrice={clickPrice}
        onSelect={id=>setSelected(id||null)} onDrag={box} onSegment={addSegment}/>
@@ -318,6 +353,8 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <Pick label="间距" value={config.spacing} options={([['LINEAR','等差'],['GEOMETRIC','等比']])} change={v=>change('spacing',v as GridConfig['spacing'])}/>
        <NumberField label="上限" value={drawings.upper} onChange={n=>box('upper',n)} step={Number(market.rules.tick)}/>
        <NumberField label="下限" value={drawings.lower} onChange={n=>box('lower',n)} step={Number(market.rules.tick)}/>
+       <NumberField label="上沿角度 °" value={drawings.upperAngle??0} onChange={n=>angle('upper',n)} min={-80} step={0.1}/>
+       <NumberField label="下沿角度 °" value={drawings.lowerAngle??0} onChange={n=>angle('lower',n)} min={-80} step={0.1}/>
        <NumberField label="网格数量" value={config.count} onChange={n=>change('count',n)} min={2} step={1}/>
        <NumberField label="初始资金（USDT）" value={config.capital} onChange={n=>change('capital',n)}/>
        <NumberField label="杠杆倍数" value={config.leverage} onChange={n=>change('leverage',n)} min={1} step={1}/>
@@ -325,9 +362,11 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <Pick label="每格单位" value={config.sizeMode} options={([['MARGIN','保证金 USDT'],['QUANTITY','合约数量']])} change={v=>change('sizeMode',v as GridConfig['sizeMode'])}/>
        <NumberField label="每格用量" value={config.size} onChange={n=>change('size',n)}/>
       </div>
-      {levels.length>0&&<p className="grid-level-info">生成 {levels.length-1} 格 · {levels[0]} – {levels.at(-1)}</p>}
+      {levels.length>0&&<p className="grid-level-info">生成 {levels.length-1} 格 · 起点 {levels[0]} – {levels.at(-1)}</p>}
+      <p className="grid-level-info">0° 为水平。角度以整个回放时长和起点箱体高度为基准，缩放图表不会改变参数。</p>
+      {channelError&&<p className="grid-error" role="alert">{channelError}</p>}
       <label className="grid-check"><input type="checkbox" checked={precise} onChange={e=>setPrecise(e.target.checked)}/>优先使用 1m 成交回放</label>
-      <button className="grid-main-action grid-start" type="button" disabled={busy||!levels.length} onClick={()=>void run()}><Play size={17}/>开始模拟</button>
+      <button className="grid-main-action grid-start" type="button" disabled={busy||!levels.length||!!channelError} onClick={()=>void run()}><Play size={17}/>开始模拟</button>
      </Card>
      <Card title="风控与费用" open={false}>
       <div className="grid-form">

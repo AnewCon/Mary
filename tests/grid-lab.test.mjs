@@ -5,7 +5,7 @@ async function bundle(entry){
  const {outputFiles:[out]}=await build({entryPoints:[entry],bundle:true,format:'esm',platform:'node',write:false});
  return import('data:text/javascript;base64,'+Buffer.from(out.text).toString('base64'));
 }
-const {defaults,gridLevels,simulateGrid}=await bundle('src/grid-engine.ts');
+const {defaults,channelLevels,gridLevels,simulateGrid}=await bundle('src/grid-engine.ts');
 const {gridMarket}=await bundle('worker/grid-market.ts');
 const base=1794873600000, minute=60000;
 const rules={tick:'0.01',quantityStep:'0.001',minQty:.001,maxQty:50000,minNotional:5,minPrice:.01,maxPrice:100000,marketMinQty:.001};
@@ -90,4 +90,18 @@ test('market rejects missing time slots and invalid time ranges',async()=>{
  await assert.rejects(gridMarket(query,source.relay,base+35*minute),/GRID_KLINE_GAPS/);
  query.set('from',String(base+44*minute));
  await assert.rejects(gridMarket(query,source.relay,base+45*minute),/GRID_INVALID_RANGE/);
+});
+
+test('independent slopes project prices per candle and reject crossing boundaries',()=>{
+ const flat={...config,lower:90,upper:110,count:4};
+ assert.deepEqual(channelLevels({...flat,upperAngle:45,lowerAngle:0},rules,.5),[90,97.5,105,112.5,120]);
+ assert.deepEqual(channelLevels({...flat,upperAngle:45,lowerAngle:45},rules,.5),[100,105,110,115,120]);
+ assert.throws(()=>channelLevels({...flat,upperAngle:-45,lowerAngle:45},rules,1),/箱体/);
+ assert.throws(()=>channelLevels({...flat,upperAngle:81},rules,1),/角度/);
+ const tape=market([[101,104,100,102],[102,106,101,105],[105,107,104,106],[106,107,105,106]]);
+ const ordinary=simulateGrid(tape,flat);
+ const shifted=simulateGrid(tape,{...flat,upperAngle:30,lowerAngle:30});
+ assert.equal(ordinary.frames[1].open[0].entry,105);
+ assert.equal(shifted.frames[1].open[0]?.entry,102.89);
+ assert.equal(ordinary.frames[0].events.length,shifted.frames[0].events.length);
 });
