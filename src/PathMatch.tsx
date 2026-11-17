@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react';
+import type { AdaptiveForecast } from '../worker/pathmatch-adaptive';
 import type { Plan, Candle } from '../worker/pathmatch-core';
 import { adjustForecast, compareForecast, fitControls, originalFitParams, type FitParams } from './pathmatch-fit';
 import './pathmatch.css';
 
 type Point=Candle&{similarity:number};
 type Prediction={strategy?:{strategyId:string;version:string;contentHash:string}|null;id:string;symbol:string;state:string;mode:string;startAt:number|null;expiresAt:number;createdAt:number;atr:number|null;
-  plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[];fit?:{pathSimilarity:number;rangeOverlap:number;trendSimilarity:number;similarity:number};complete?:boolean;veto?:string|null;decision?:string}|null};
+  plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[];adaptive?:AdaptiveForecast;fit?:{pathSimilarity:number;rangeOverlap:number;trendSimilarity:number;similarity:number};complete?:boolean;veto?:string|null;decision?:string}|null};
 const stamp=(value:number)=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
 const states:Record<string,string>={DRAFT:'草稿',ARMED:'已锁定',VALIDATING:'观测中',CANCELED:'已取消',EXPIRED:'已到期',COMPLETED:'拟合完成'};
 
@@ -64,7 +65,7 @@ function Chart({row,adjusted}:{row:Prediction;adjusted?:Candle[]}){
         const center=i*step+step/2-(minuteForecast?offset:0.05);
         draw({...bar,open},center,candleWidth,'original');
       });
-      adjusted?.forEach((bar,i)=>draw(bar,i+0.5,candleWidth,'adjusted'));
+      adjusted?.forEach((bar,i)=>draw(bar,row.startAt?(bar.time-row.startAt)/60000+0.5:i+0.5,candleWidth,'adjusted'));
       for(const point of actual){
         const index=(point.time-(row.startAt??point.time))/60000+0.5+(minuteForecast?offset:0);
         draw(point,index,candleWidth,'actual');
@@ -86,9 +87,33 @@ function FitPanel({row,watching}:{row:Prediction;watching:boolean}){
   const adjusted=useMemo(()=>adjustForecast(row.plan,params,row.atr),[row.plan,params,row.atr]);
   const result=useMemo(()=>adjusted?compareForecast(row.plan,adjusted,row.result?.points??[],row.startAt,row.atr):null,[row,adjusted]);
 
+  const adaptive=row.result?.adaptive;
+  const rolling=adaptive?.status==='ACTIVE'?adaptive:null;
+  const latest=rolling?.rounds.at(-1);
+  const plotted=changed?adjusted??undefined:rolling?.candles.length?rolling.candles:undefined;
+
   return <>
-    <p className="pathmatch-legend"><span>□ 原始预测</span>{changed&&adjusted&&<span>▣ 加工预测</span>}<span>■ 实际已收盘 1m</span></p>
-    <Chart row={row} adjusted={changed?adjusted??undefined:undefined}/>
+    <p className="pathmatch-legend"><span>□ 原始预测</span>{plotted&&<span>▣ {changed?'手动加工':'滚动预测'}</span>}<span>■ 实际已收盘 1m</span></p>
+    <Chart row={row} adjusted={plotted}/>
+    <section className="pathmatch-adaptive" aria-label="滚动拟合">
+      <h3>滚动拟合</h3>
+      {rolling&&latest?<>
+        <p>{rolling.scope==='SYMBOL'?'同币种':'跨币种'}历史样本 {rolling.sampleCount} 条 · 用前 {latest.observed} 根收盘 K 线更新 · {stamp(latest.lockedAt)}</p>
+        <div className="pathmatch-rolling-stats">
+          <div><span>已见区间拟合</span><b>{percent(latest.selected.observedFit)}</b></div>
+          <div><span>滚动预测均分</span><b>{percent(rolling.score??undefined)}</b></div>
+          <div><span>原始预测同分钟均分</span><b>{percent(rolling.originalScore??undefined)}</b></div>
+        </div>
+        <p>已验证 {rolling.evaluated} 次下一根预测。每次使用收盘前已锁定的预测评分。{latest.observedGain!==null&&`在同一批已见 K 线上，本轮参数较上一轮 ${latest.observedGain>0?'+':''}${latest.observedGain.toFixed(1)} 个百分点。`}</p>
+        <p>{latest.selected.method==='ORIGINAL'?'沿用原始预测':`趋势 ${latest.selected.params.slope}% · 影线 ${latest.selected.params.wick}% · 回踩 ${latest.selected.params.pullback}% ATR`}</p>
+        {!rolling.complete&&<p>第 {latest.observed+1} 根预测 · 开 {Number(latest.next.open.toPrecision(9))} · 高 {Number(latest.next.high.toPrecision(9))} · 低 {Number(latest.next.low.toPrecision(9))} · 收 {Number(latest.next.close.toPrecision(9))}</p>}
+        <details><summary>参数候选 · 历史下一根加权拟合</summary>
+          {[latest.selected,...latest.alternatives].map((c,i)=><p key={i}>{i===0?'已选 · ':''}{c.method==='ORIGINAL'?'原始':`趋势 ${c.params.slope}% / 影线 ${c.params.wick}% / 回踩 ${c.params.pullback}% ATR`} · {percent(c.historicalFit)}</p>)}
+        </details>
+      </>:<p>{adaptive?.status==='INSUFFICIENT_DATA'?`合格历史样本 ${adaptive.sampleCount??0} 条，暂不足以选参。`:
+        adaptive?.status==='HISTORY_UNAVAILABLE'?'暂时无法读取历史拟合样本。':
+        row.result?.complete?'这条历史记录没有当时锁定的滚动预测。':'等待第一根 1 分钟 K 线收盘。'}</p>}
+    </section>
     <details className="pathmatch-parameters">
       <summary><SlidersHorizontal size={16}/>拟合参数</summary>
       <p>复盘试算。参数只作用于加工预测，原始预测、正式评分和交易判定保留。</p>

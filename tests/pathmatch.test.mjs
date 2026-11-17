@@ -161,3 +161,51 @@ test('deletion hides a prediction, stops observation and preserves its audit dat
  assert.equal(calls,0);
 });
 
+
+test('rolling fit locks each next candle once, excludes future history and scores earlier predictions',async(t)=>{
+ const now=start-10000,id='f'.repeat(32);
+ t.mock.method(Date,'now',()=>now);
+ const database=db();
+ const insert=database.prepare("INSERT INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at,start_at,atr,last_check,result,deleted_at) VALUES(?,?,?,'2.6-pathmatch','COMPLETED',?,?,?,?,?,?,?)");
+ for(let i=0;i<7;i++){
+  const sampleStart=start-(i+1)*20*M;
+  const forecast=fullPlan.forecast.candles.map((bar,j)=>({...bar,time:sampleStart+j*M}));
+  const actual=forecast.map(bar=>({...bar,close:100.05,high:100.2,low:99.4}));
+  const samplePlan={...fullPlan,referenceTime:sampleStart-M,expiresAt:sampleStart+15*M,forecast:{interval:'1m',candles:forecast}};
+  const recorded=i===5?start+2*M:sampleStart+15*M;
+  insert.bind((i+1).toString(16).repeat(32),JSON.stringify(samplePlan),samplePlan.symbol,sampleStart-10000,
+   samplePlan.expiresAt,sampleStart,2,recorded,JSON.stringify({complete:true,points:actual}),i===6?start:null).run();
+ }
+ await createPrediction(database,{id,plan:fullPlan});
+ await armPrediction(database,relay(now),{id,mode:'SHADOW',confirm:true});
+ await monitorPredictions(database,relay(start+M),start+M);
+ const first=(await predictionStatus(database,id)).result.adaptive;
+ assert.equal(first.status,'ACTIVE');assert.equal(first.scope,'SYMBOL');assert.equal(first.sampleCount,5);
+ assert.equal(first.rounds[0].next.time,start+M);
+ assert.equal(first.candles.length,14);assert.equal(first.evaluated,0);
+ await monitorPredictions(database,relay(start+M),start+M);
+ assert.deepEqual((await predictionStatus(database,id)).result.adaptive,first);
+ await monitorPredictions(database,relay(start+2*M),start+2*M);
+ const second=(await predictionStatus(database,id)).result.adaptive;
+ assert.deepEqual(second.rounds[0],first.rounds[0]);
+ assert.equal(second.rounds[1].next.time,start+2*M);assert.equal(second.evaluated,1);
+ assert.ok(second.rounds[1].observedGain>=0);
+ await monitorPredictions(database,relay(start+15*M),start+15*M);
+ const final=(await predictionStatus(database,id)).result.adaptive;
+ assert.equal(final.evaluated,2);assert.equal(final.complete,true);
+ assert.deepEqual(final.rounds,second.rounds);assert.equal(final.candles.length,0);
+ assert.ok(Number.isFinite(final.score));
+ assert.ok(Number.isFinite(final.originalScore));
+});
+
+test('rolls forward from available data without inventing forecasts for skipped minutes',async(t)=>{
+ const now=start-10000,id='9'.repeat(32);
+ t.mock.method(Date,'now',()=>now);
+ const database=db();
+ await createPrediction(database,{id,plan:fullPlan});
+ await armPrediction(database,relay(now),{id,mode:'SHADOW',confirm:true});
+ await monitorPredictions(database,relay(start+2*M),start+2*M);
+ const observed=(await predictionStatus(database,id)).result;
+ assert.equal(observed.points.length,2);
+ assert.deepEqual(observed.adaptive,{status:'INSUFFICIENT_DATA',sampleCount:0});
+});

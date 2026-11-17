@@ -1,3 +1,4 @@
+import { chooseAdaptiveForecast, evaluateIssuedForecast, shouldIssueForecast, type AdaptiveForecast, type CalibrationSample } from './pathmatch-adaptive';
 import type { StrategyBinding } from './strategy-center';
 import { Failure } from './exchange';
 import { atr14, match, minute, parsePlan, type Candle, type Plan } from './pathmatch-core';
@@ -165,20 +166,55 @@ export async function predictionHistory(db:D1Database,query:URLSearchParams){
   return rows.results.map(view);
 }
 
+async function completedSamples(db:D1Database,cutoff:number):Promise<CalibrationSample[]>{
+  const rows=await db.prepare(`SELECT symbol,start_at,atr,payload,result FROM pathmatch_predictions
+    WHERE state='COMPLETED' AND deleted_at IS NULL AND expires_at<=? AND last_check<=? AND last_check>=?
+    ORDER BY last_check DESC LIMIT 36`).bind(cutoff,cutoff,cutoff-30*24*60*minute)
+    .all<{symbol:string;start_at:number;atr:number;payload:string;result:string}>();
+  return rows.results.flatMap(row=>{
+    const plan=JSON.parse(row.payload) as Plan,result=JSON.parse(row.result);
+    return row.atr>0&&plan.forecast.interval==='1m'&&result?.complete===true&&result.points?.length===15?
+      [{symbol:row.symbol,start:row.start_at,atr:row.atr,plan,actual:result.points}]:[];
+  });
+}
+
 export async function monitorPredictions(db:D1Database,relay:DurableObjectStub,now=Date.now()){
   const {results}=await db.prepare("SELECT * FROM pathmatch_predictions WHERE deleted_at IS NULL AND state IN ('ARMED','VALIDATING') ORDER BY created_at LIMIT 5").all<Slot>();
   const symbols=new Map<string,Promise<Candle[]>>();
+  const history=new Map<number,Promise<CalibrationSample[]>>();
+  const realStart=Date.now();
+  const issueTime=()=>now+Math.max(0,Date.now()-realStart);
   await Promise.all(results.map(async row=>{
     const start=row.start_at!;
     if(now<start+minute&&now<row.expires_at)return;
     const cutoff=Math.min(now,row.expires_at);
     const plan=JSON.parse(row.payload) as Plan;
+    const previous:AdaptiveForecast|undefined=row.result?JSON.parse(row.result).adaptive:undefined;
     let state='VALIDATING',result:any;
     try{
       let received=symbols.get(row.symbol);
       if(!received){received=candles(relay,row.symbol,'1m','limit=17',now);symbols.set(row.symbol,received);}
       const data=(await received).filter(o=>o.time>=start&&o.time+minute<=cutoff);
       result=match(plan,start,row.atr!,data,cutoff);
+      if(plan.forecast.interval==='1m'){
+        let adaptive=previous;
+        if(result.status!=='ERROR'){
+          adaptive=evaluateIssuedForecast(previous,plan,data,row.atr!);
+          if(shouldIssueForecast(adaptive,data,issueTime())){
+            const historyCutoff=data[0].time+minute;
+            try{
+              let cached=history.get(historyCutoff);
+              if(!cached){cached=completedSamples(db,historyCutoff);history.set(historyCutoff,cached);}
+              const available=await cached;
+              const picked=chooseAdaptiveForecast(adaptive,plan,data,row.atr!,available,issueTime());
+              if(shouldIssueForecast(adaptive,data,issueTime()))adaptive=picked;
+            }catch{
+              if(!adaptive||adaptive.status!=='ACTIVE')adaptive={status:'HISTORY_UNAVAILABLE'};
+            }
+          }
+        }
+        if(adaptive)result={...result,adaptive};
+      }
       const elapsed=Math.floor((cutoff-start)/minute);
       if(result.status!=='ERROR'&&result.status!=='CANCELED'&&data.length<elapsed){
         result={...result,status:'VALIDATING',reason:'MISSING_OR_DELAYED_CANDLE'};
