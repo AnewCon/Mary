@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import { Activity, RefreshCw, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { Plan, Candle } from '../worker/pathmatch-core';
+import { adjustForecast, compareForecast, fitControls, originalFitParams, type FitParams } from './pathmatch-fit';
 import './pathmatch.css';
 
-type Point=Candle&{expected:number;lower:number;upper:number;similarity:number};
+type Point=Candle&{similarity:number};
 type Prediction={strategy?:{strategyId:string;version:string;contentHash:string}|null;id:string;symbol:string;state:string;mode:string;startAt:number|null;expiresAt:number;createdAt:number;atr:number|null;
   plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[];fit?:{pathSimilarity:number;rangeOverlap:number;trendSimilarity:number;similarity:number};complete?:boolean;veto?:string|null;decision?:string}|null};
 const stamp=(value:number)=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
 const states:Record<string,string>={DRAFT:'草稿',ARMED:'已锁定',VALIDATING:'观测中',CANCELED:'已取消',EXPIRED:'已到期',COMPLETED:'拟合完成'};
 
-function Chart({row}:{row:Prediction}){
+function Chart({row,adjusted}:{row:Prediction;adjusted?:Candle[]}){
   const canvas=useRef<HTMLCanvasElement>(null);
   useEffect(()=>{
     const target=canvas.current;
@@ -23,9 +24,13 @@ function Chart({row}:{row:Prediction}){
       context.scale(dpr,dpr);
       const {plan,atr}=row,actual=row.result?.points??[];
       const tolerance=(atr??0)*plan.validation.atrTolerance;
-      const values=[plan.referencePrice,plan.hardInvalidation,plan.entry.priceMin,plan.entry.priceMax,...actual.flatMap(x=>[x.low,x.high]),
-        ...plan.forecast.candles.flatMap(x=>[x.low-tolerance,x.high+tolerance])];
-      const min=Math.min(...values),max=Math.max(...values),span=max-min||1;
+      const candles=plan.forecast.candles;
+      const values=[plan.referencePrice,...actual.flatMap(x=>[x.low,x.high]),...candles.flatMap(x=>[x.low,x.high]),
+        ...(adjusted??[]).flatMap(x=>[x.low,x.high])];
+      if(plan.forecast.interval==='5m')values.push(plan.hardInvalidation,plan.entry.priceMin,plan.entry.priceMax,
+        ...candles.flatMap(x=>[x.low-tolerance,x.high+tolerance]));
+      const bottom=Math.min(...values),top=Math.max(...values),padding=(top-bottom||top*0.005)*0.07;
+      const min=bottom-padding,max=top+padding,span=max-min;
       const x=(n:number)=>12+(width-88)*n/15;
       const y=(n:number)=>18+(max-n)/span*(height-48);
       context.font='11px sans-serif';
@@ -34,7 +39,6 @@ function Chart({row}:{row:Prediction}){
         context.strokeStyle='#d8e4dc';context.beginPath();context.moveTo(x(0),y(px));context.lineTo(x(15),y(px));context.stroke();
         context.fillStyle='#486459';context.fillText(px.toPrecision(5),x(15)+5,y(px)+4);
       }
-      const candles=plan.forecast.candles;
       const minuteForecast=plan.forecast.interval==='1m';
       const step=minuteForecast?1:5;
       for(let i=0;i<3;i++){
@@ -42,28 +46,80 @@ function Chart({row}:{row:Prediction}){
         context.strokeStyle='#dce6e0';context.beginPath();context.moveTo(x(minute),18);context.lineTo(x(minute),height-22);context.stroke();
         context.fillStyle='#486459';context.fillText('+'+minute+'m',x(minute)-17,height-8);
       }
-      const draw=(bar:Omit<Candle,'time'>,index:number,w:number,outline:boolean)=>{
+      const draw=(bar:Omit<Candle,'time'>,index:number,w:number,series:'original'|'adjusted'|'actual')=>{
         const column=x(index),top=Math.min(y(bar.open),y(bar.close)),body=Math.max(2,Math.abs(y(bar.open)-y(bar.close)));
-        context.strokeStyle=bar.close>=bar.open?'#27755d':'#a04046';context.fillStyle=context.strokeStyle;
+        context.strokeStyle=series==='original'&&adjusted?'#6c7e88':bar.close>=bar.open?'#27755d':'#a04046';
+        context.fillStyle=context.strokeStyle;
         context.beginPath();context.moveTo(column,y(bar.high));context.lineTo(column,y(bar.low));context.stroke();
-        if(outline){context.fillStyle='#f6faf6';context.fillRect(column-w/2,top,w,body);context.strokeRect(column-w/2,top,w,body);}
-        else context.fillRect(column-w/2,top,w,body);
+        if(series==='actual')context.fillRect(column-w/2,top,w,body);
+        else{
+          context.fillStyle=series==='adjusted'?(bar.close>=bar.open?'#c6ebd7':'#ffd5d6'):'#f6faf6';
+          context.fillRect(column-w/2,top,w,body);context.strokeRect(column-w/2,top,w,body);
+        }
       };
-      const candleWidth=Math.max(2,Math.min(10,(x(1)-x(0))*0.34));
+      const candleWidth=Math.max(2,Math.min(10,(x(1)-x(0))*(adjusted?0.23:0.34)));
+      const offset=adjusted?0.29:0.19;
       candles.forEach((bar,i)=>{
         const open='open' in bar?bar.open:(i===0?plan.referencePrice:candles[i-1].close);
-        const center=i*step+step/2-(minuteForecast?0.19:0.05);
-        draw({...bar,open},center,candleWidth,true);
+        const center=i*step+step/2-(minuteForecast?offset:0.05);
+        draw({...bar,open},center,candleWidth,'original');
       });
+      adjusted?.forEach((bar,i)=>draw(bar,i+0.5,candleWidth,'adjusted'));
       for(const point of actual){
-        const index=(point.time-(row.startAt??point.time))/60000+0.5+(minuteForecast?0.19:0);
-        draw(point,index,candleWidth,false);
+        const index=(point.time-(row.startAt??point.time))/60000+0.5+(minuteForecast?offset:0);
+        draw(point,index,candleWidth,'actual');
       }
     };
     const observer=new ResizeObserver(chart);observer.observe(target);chart();
     return ()=>observer.disconnect();
-  },[row]);
-  return <canvas ref={canvas} className="pathmatch-chart" aria-label="预测与真实已收盘蜡烛图，共用时间和价格坐标"/>;
+  },[row,adjusted]);
+  return <canvas ref={canvas} className="pathmatch-chart" aria-label={adjusted?'原始、加工与实际蜡烛图，共用时间和价格坐标':'原始预测与实际蜡烛图，共用时间和价格坐标'}/>;
+}
+
+const metrics=[['轨迹相似度','pathSimilarity'],['高低区间重合度','rangeOverlap'],
+  ['趋势一致度','trendSimilarity'],['综合拟合度','similarity']] as const;
+const percent=(value:number|undefined)=>value===undefined?'—':value.toFixed(1)+'%';
+
+function FitPanel({row,watching}:{row:Prediction;watching:boolean}){
+  const [params,setParams]=useState<FitParams>(originalFitParams);
+  const changed=fitControls.some(({key})=>params[key]!==originalFitParams[key]);
+  const adjusted=useMemo(()=>adjustForecast(row.plan,params,row.atr),[row.plan,params,row.atr]);
+  const result=useMemo(()=>adjusted?compareForecast(row.plan,adjusted,row.result?.points??[],row.startAt,row.atr):null,[row,adjusted]);
+
+  return <>
+    <p className="pathmatch-legend"><span>□ 原始预测</span>{changed&&adjusted&&<span>▣ 加工预测</span>}<span>■ 实际已收盘 1m</span></p>
+    <Chart row={row} adjusted={changed?adjusted??undefined:undefined}/>
+    <details className="pathmatch-parameters">
+      <summary><SlidersHorizontal size={16}/>拟合参数</summary>
+      <p>复盘试算。参数只作用于加工预测，原始预测、正式评分和交易判定保留。</p>
+      <div className="pathmatch-controls">{fitControls.map(({key,label,min,max,step,unit,description})=>
+        <label key={key}><span>{label}<output>{params[key]}{unit}</output></span>
+          <input type="range" aria-label={label} min={min} max={max} step={step} value={params[key]}
+            disabled={key==='pullback'&&row.atr===null}
+            onChange={event=>{const value=event.currentTarget.valueAsNumber;setParams(previous=>({...previous,[key]:value}));}}/>
+          <small>{key==='pullback'&&row.atr===null?'锁定 ATR 后可调。':description}</small>
+        </label>)}</div>
+      <div className="actions">
+        <button type="button" onClick={()=>setParams({...originalFitParams,slope:50})}>趋势减半</button>
+        <button type="button" disabled={!changed} onClick={()=>setParams(originalFitParams)}>恢复原始</button>
+      </div>
+      {changed&&!adjusted&&<p role="alert">加工后出现无效价格，请缩小参数幅度。</p>}
+    </details>
+    <div className="pathmatch-fit">{metrics.map(([label,key])=>{
+      const original=row.result?.fit?.[key],processed=result?.[key];
+      const delta=original!==undefined&&processed!==undefined?Math.round((processed-original)*10)/10:null;
+      return <div key={key}><span>{label}</span>
+        <small>原始 <strong>{percent(original)}</strong></small>
+        <small>加工 <strong>{percent(processed)}</strong></small>
+        {changed&&delta!==null&&<small className={delta<0?'fit-down':delta>0?'fit-up':''}>{delta>0?'+':''}{delta.toFixed(1)} 个百分点</small>}
+      </div>;
+    })}
+      <p>已收盘 {row.result?.points?.length??0}/15 {row.result?.complete?' · 最终结果':watching?' · 观察中':' · 未形成最终结果'}
+        {row.result?.decision==='REVIEW'?' · 待复核':' · WAIT'}{row.result?.veto?' · 已触发硬性失效':''}</p>
+    </div>
+    {changed&&adjusted&&<details><summary>加工 OHLC 明细</summary><div className="pathmatch-forecast">{adjusted.map((bar,i)=>
+      <div key={bar.time}><strong>第 {i+1} 根 1m</strong><small>开 {Number(bar.open.toPrecision(9))} · 高 {Number(bar.high.toPrecision(9))} · 低 {Number(bar.low.toPrecision(9))} · 收 {Number(bar.close.toPrecision(9))}</small></div>)}</div></details>}
+  </>;
 }
 
 export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promise<any>}){
@@ -115,15 +171,11 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
           </div></div>
         <div className="pathmatch-inner">
           <p>绑定策略 {row.strategy?<span title={row.strategy.contentHash}>{row.strategy.strategyId} v{row.strategy.version}</span>:'—'}</p>
-          <p className="pathmatch-legend"><span>□ 预测蜡烛</span><span>■ 实际已收盘 1m</span></p>
-          <Chart row={row}/>
-          {row.plan.forecast.interval==='5m'&&<p>历史计划 · 三根 5 分钟预测，开盘价按上一根预测收盘价绘制。</p>}
-          {row.plan.forecast.interval==='1m'&&<div className="pathmatch-fit">
-            {([['轨迹相似度','pathSimilarity'],['高低区间重合度','rangeOverlap'],['趋势一致度','trendSimilarity'],['综合拟合度','similarity']] as const).map(([label,key])=>
-              <div key={key}><span>{label}</span><b>{row.result?.fit?.[key]?.toFixed(1)??'—'}{row.result?.fit?'%':''}</b></div>)}
-            <p>已收盘 {row.result?.points?.length??0}/15 {row.result?.complete?' · 最终结果':watching?' · 观察中':' · 未形成最终结果'}
-              {row.result?.decision==='REVIEW'?' · 待复核':' · WAIT'}{row.result?.veto?' · 已触发硬性失效':''}</p>
-          </div>}
+          {row.plan.forecast.interval==='1m'?<FitPanel key={row.id} row={row} watching={watching}/>:<>
+            <p className="pathmatch-legend"><span>□ 原始预测</span><span>■ 实际已收盘 1m</span></p>
+            <Chart row={row}/>
+            <p>历史计划 · 三根 5 分钟预测，开盘价按上一根预测收盘价绘制。</p>
+          </>}
           <dl className="pathmatch-facts">
             <div><dt>剩余验证时间</dt><dd>{watching?Math.max(0,Math.ceil((row.expiresAt-now)/1000))+' 秒':'—'}</dd></div>
             <div><dt>入场范围</dt><dd>{row.plan.entry.priceMin} – {row.plan.entry.priceMax}</dd></div>
