@@ -5,7 +5,7 @@ async function bundle(entry){
  const {outputFiles:[out]}=await build({entryPoints:[entry],bundle:true,format:'esm',platform:'node',write:false});
  return import('data:text/javascript;base64,'+Buffer.from(out.text).toString('base64'));
 }
-const {defaults,channelBox,channelLevels,moveChannelStart,gridLevels,simulateGrid}=await bundle('src/grid-engine.ts');
+const {defaults,channelBox,channelLevels,moveChannelStart,gridLevels,inspectGrid,simulateGrid}=await bundle('src/grid-engine.ts');
 const {gridMarket}=await bundle('worker/grid-market.ts');
 const base=1794873600000, minute=60000;
 const rules={tick:'0.01',quantityStep:'0.001',minQty:.001,maxQty:50000,minNotional:5,minPrice:.01,maxPrice:100000,marketMinQty:.001};
@@ -118,4 +118,28 @@ test('moving the left boundary preserves both right endpoint prices',()=>{
  const right=channelBox(moveChannelStart(base,rules,'lower',96,.25),1);
  assert.ok(Math.abs(right.lower-initialEnd.lower)<1e-9);
  assert.throws(()=>moveChannelStart(base,rules,'upper',base.lower-1,0),/交叉/);
+});
+
+test('initial outside candles wait, a touch alone cannot activate, and a close inside activates on next bar',()=>{
+ const data=market([[123,124,119,123],[123,124,115,118],[118,119,111,114],[114,123,113,122]]);
+ const reviewed=inspectGrid(data,config);
+ assert.equal(reviewed[0].touches,true);
+ assert.equal(reviewed[0].closesInside,false);
+ assert.equal(reviewed[1].closesInside,true);
+ const result=simulateGrid(data,config);
+ assert.equal(result.waitedBars,2);
+ assert.equal(result.activeAt,base+2*minute);
+ assert.deepEqual(result.frames.slice(0,2).map(f=>f.state),['WAITING_FOR_BOX','WAITING_FOR_BOX']);
+ assert.ok(result.frames.slice(0,2).every(f=>f.events.length===0&&f.equity===80));
+ assert.equal(result.state,'HALTED');
+ assert.ok(result.last.events.some(e=>e.kind==='BREAKOUT'));
+});
+test('never entering a box gives a complete zero-trade replay instead of a first-candle halt',()=>{
+ const data=market([[123,125,121,123],[123,125,121,122],[122,125,121,123]]);
+ const result=simulateGrid(data,config);
+ assert.equal(result.frames.length,3);
+ assert.equal(result.activeAt,null);
+ assert.equal(result.state,'NO_BOX_ENTRY');
+ assert.equal(result.trades.length,0);
+ assert.equal(result.last.equity,80);
 });

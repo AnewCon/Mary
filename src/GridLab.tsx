@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChartCandlestick, Download, Lock, Unlock, Play, Pause, RotateCcw, Save, FolderOpen, SkipBack, SkipForward, Undo2, Redo2 } from 'lucide-react';
 import GridChart, { fullTime, type Drawing, type DrawingPoint } from './GridChart';
-import { defaults, channelLevels, channelBox, moveChannelStart, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
+import { defaults, channelLevels, channelBox, moveChannelStart, gridLevels, inspectGrid, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
 import './grid-lab.css';
 
 type Api=(path:string)=>Promise<any>;
@@ -34,11 +34,11 @@ const dbAccess=()=>new Promise<IDBDatabase>((resolve,reject)=>{
  req.onupgradeneeded=()=>req.result.createObjectStore('scenarios');
  req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
 });
-async function localScenario(value?:Scenario):Promise<Scenario|undefined>{
+async function localScenario(value?:Scenario,key:'latest'|'box'='latest'):Promise<Scenario|undefined>{
  const db=await dbAccess();
  try{return await new Promise((resolve,reject)=>{
   const tx=db.transaction('scenarios',value?'readwrite':'readonly');
-  const req=value?tx.objectStore('scenarios').put(value,'latest'):tx.objectStore('scenarios').get('latest');
+  const req=value?tx.objectStore('scenarios').put(value,key):tx.objectStore('scenarios').get(key);
   tx.oncomplete=()=>resolve(value?undefined:req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
  });}finally{db.close();}
 }
@@ -88,7 +88,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  const [selected,setSelected]=useState<number|null>(null),[tool,setTool]=useState<'PAN'|'LINE'|'BOX'|'SEGMENT'|'ANGLE'>('PAN');
  const [anchor,setAnchor]=useState<number|null>(null),[locked,setLocked]=useState(false),[precise,setPrecise]=useState(true);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[dark,setDark]=useState(true);
- const [saved,setSaved]=useState(false);
+ const [saved,setSaved]=useState(false),[savedBox,setSavedBox]=useState(false),[showData,setShowData]=useState(false);
  const requestNumber=useRef(0),replayNumber=useRef(0),dragStart=useRef<DrawingState|null>(null),lineId=useRef(1);
  const skipLoad=useRef(false);
  const frame=result&&cursor>0?result.frames[Math.min(cursor,result.frames.length)-1]:undefined;
@@ -105,6 +105,11 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  const levels=useMemo(()=>{
   try{return market?gridLevels({...config,lower:drawings.lower,upper:drawings.upper},market.rules):[];}catch{return [];}
  },[config,drawings.lower,drawings.upper,market]);
+ const tradeable=useMemo(()=>{
+  if(!showData||!market)return null;
+  try{return inspectGrid(simulation??market,{...config,lower:drawings.lower,upper:drawings.upper,
+   upperAngle:drawings.upperAngle??0,lowerAngle:drawings.lowerAngle??0});}catch{return null;}
+ },[showData,market,simulation,config,drawings]);
  const channelMarket=simulation??market;
  const levelsAt=(time:number)=>{
   if(!channelMarket)return levels;
@@ -204,7 +209,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  }
  useEffect(()=>{if(skipLoad.current){skipLoad.current=false;return;}const timeout=window.setTimeout(()=>void load(),300);
   return ()=>window.clearTimeout(timeout);},[range,interval,activeSymbol]);
- useEffect(()=>{void localScenario().then(data=>setSaved(!!data)).catch(()=>{});},[]);
+ useEffect(()=>{void localScenario().then(data=>setSaved(!!data)).catch(()=>{});void localScenario(undefined,'box').then(data=>setSavedBox(!!data)).catch(()=>{});},[]);
  useEffect(()=>{
   if(!playing||!result)return;
   const timer=window.setInterval(()=>setCursor(n=>Math.min(result.frames.length,n+(speed===50?5:1))),Math.max(50,500/Math.min(10,speed)));
@@ -237,24 +242,25 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
   }catch(err){if(ordinal===replayNumber.current)setError(explain(err));}
   finally{if(ordinal===replayNumber.current)setBusy(false);}
  }
- async function save(){
+ async function save(key:'latest'|'box'='latest'){
   if(!market)return;
   try{
    await localScenario({schema:1,symbol:market.symbol,interval,range,config:params,drawings,market,
-    ...(simulation&&result?{simulation,result}:{})});
-   setSaved(true);setNotice('方案已保存到此设备。');
+    ...(key==='latest'&&simulation&&result?{simulation,result}:{})},key);
+   if(key==='box'){setSavedBox(true);setNotice('箱体已保存到此设备。');}
+   else{setSaved(true);setNotice('方案已保存到此设备。');}
   }catch{setError('无法保存方案。请检查浏览器存储空间。');}
  }
- async function restore(){
+ async function restore(key:'latest'|'box'='latest'){
   try{
-   const data=await localScenario();if(!data||data.schema!==1)return;
+   const data=await localScenario(undefined,key);if(!data||data.schema!==1)return;
    requestNumber.current++;setBusy(false);clearSimulation();skipLoad.current=activeSymbol!==data.symbol||interval!==data.interval||JSON.stringify(range)!==JSON.stringify(data.range);
    setSymbol(data.symbol);setActiveSymbol(data.symbol);setIntervalValue(data.interval);
    if(JSON.stringify(range)!==JSON.stringify(data.range))setRange(data.range);
    setMarket(data.market);setConfig(data.config);setDrawings(data.drawings);setUndo([]);setRedo([]);setLocked(false);
    lineId.current=Math.max(0,...data.drawings.lines.map(x=>x.id))+1;
    if(data.result&&data.simulation){setResult(data.result);setSimulation(data.simulation);}
-   setNotice('已恢复本机方案。');setError('');
+   setNotice(key==='box'?'已恢复本机箱体。':'已恢复本机方案。');setError('');
   }catch{setError('无法恢复本机方案。');}
  }
  function exportResult(){
@@ -276,6 +282,9 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
  const displayBars=result?simulation?.candles.slice(0,cursor)??[]:market?.candles??[];
  const visibleFrames=result?.frames.slice(0,cursor);
  const recent=visibleFrames?.slice(-10).flatMap(f=>f.events).slice(-12).reverse()??[];
+ const dataVisible=showData&&(!result||ended);
+ const inspected=tradeable?.slice(0,result?cursor:undefined)??[];
+ const reviewed=inspected.filter(row=>row.touches);
  const closedRows=frame?result?.trades.slice(0,frame.done)??[]:[];
  const summary=stats?([['价格',market?priceFormat(stats.last,market.rules.tick):'—'],['区间涨跌',stats.change.toFixed(2)+'%'],
   ['区间最高',market?priceFormat(stats.high,market.rules.tick):'—'],['区间最低',market?priceFormat(stats.low,market.rules.tick):'—'],['成交量',money(stats.vol)]]):[];
@@ -294,6 +303,7 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
     <button className="grid-main-action" type="submit" disabled={busy}><ChartCandlestick size={16}/>获取 K 线</button>
     <button type="button" disabled={!market||busy} onClick={()=>void save()}><Save size={15}/>保存方案</button>
     <button type="button" disabled={!saved||busy} onClick={()=>void restore()}><FolderOpen size={15}/>打开已保存方案</button>
+    {!market&&savedBox&&<button type="button" disabled={busy} onClick={()=>void restore('box')}>恢复箱体</button>}
    </form>
    {busy&&<p role="status">正在请求行情或准备回放…</p>}{error&&<p role="alert" className="grid-error">{error}</p>}{notice&&<p role="status">{notice}</p>}
   </section>
@@ -327,8 +337,9 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        stops={[config.stopLower,config.stopUpper]} lines={drawings.lines} selected={selected} locked={locked||!!result}
        tool={result?'PAN':tool} anchor={anchor} frame={frame} frames={visibleFrames} onPrice={clickPrice}
        onSelect={id=>setSelected(id||null)} onDrag={box} onSegment={addSegment}/>
+      {frame?.state==='WAITING_FOR_BOX'&&<p className="grid-draw-hint" role="status">等待价格进箱 · 当前没有下单</p>}
       {result&&<div className="grid-replay">
-       <button type="button" onClick={()=>{if(ended)setCursor(0);setPlaying(v=>!v);}}>{playing?<Pause size={15}/>:<Play size={15}/>} {playing?'暂停':cursor?'继续播放':'播放'}</button>
+       <button type="button" onClick={()=>{if(ended)setCursor(0);setPlaying(v=>!v);}}>{playing?<Pause size={15}/>:<Play size={15}/>} {playing?'暂停':ended?'从头播放':cursor?'继续播放':'播放'}</button>
        <button type="button" aria-label="重新播放" onClick={()=>{setCursor(0);setPlaying(true);}}><RotateCcw size={15}/></button>
        <button type="button" aria-label="上一步" onClick={()=>{setPlaying(false);setCursor(n=>Math.max(0,n-1));}}><SkipBack size={15}/></button>
        <button type="button" aria-label="下一步" onClick={()=>{setPlaying(false);setCursor(n=>Math.min(result.frames.length,n+1));}}><SkipForward size={15}/></button>
@@ -337,8 +348,23 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <span>{cursor} / {result.frames.length}</span><button type="button" onClick={clearSimulation}>返回绘图</button>
       </div>}
      </section>
+     {dataVisible&&<section className="grid-lab-card grid-ledger" id="grid-tradeable-data" aria-label="可交易数据">
+      <h3>可交易数据</h3>
+      {tradeable?<>
+       <p>{channelMarket?.interval} · 共 {inspected.length} 根，接触箱体 {reviewed.length} 根，开盘在箱体内 {inspected.filter(row=>row.opensInside).length} 根。接触箱体仅表示价格范围相交，成交以模拟记录为准。</p>
+       <div className="grid-order-table"><table><thead><tr><th>时间（北京时间）</th><th>开 / 收</th><th>低 / 高</th><th>箱体下沿 / 上沿</th><th>范围状态</th></tr></thead>
+       <tbody>{reviewed.slice(0,100).map(({bar,lower,upper,opensInside,closesInside,contained})=>
+        <tr key={bar.time}><td>{fullTime.format(bar.time)}</td><td>{priceFormat(bar.open,market.rules.tick)} / {priceFormat(bar.close,market.rules.tick)}</td>
+         <td>{priceFormat(bar.low,market.rules.tick)} / {priceFormat(bar.high,market.rules.tick)}</td><td>{lower} / {upper}</td>
+         <td>{contained?'整根在箱体内':opensInside?'开盘在箱体内':closesInside?'收盘进入箱体':'仅盘中触及'}</td></tr>)}</tbody></table></div>
+       {!reviewed.length&&<p>这段行情没有接触当前箱体。可调整箱体或更换时间范围。</p>}
+       {reviewed.length>100&&<p>表格最多显示前 100 根符合条件的 K 线。</p>}
+      </>:<p>当前箱体无效，请先检查上、下沿和网格数量。</p>}
+     </section>}
      {result&&<section className="grid-lab-card grid-ledger">
       <div className="grid-report-title"><h3>{ended?'回测报告':'回放记录'}</h3><button type="button" onClick={exportResult} disabled={!ended}><Download size={15}/>导出 JSON</button></div>
+      {ended&&result.state==='NO_BOX_ENTRY'&&<p role="status">所选区间内没有形成可启动的进箱，模拟已走完该区间。</p>}
+      {ended&&result.waitedBars>0&&result.activeAt!==null&&<p>等待进箱 {result.waitedBars} 根 · 从 {fullTime.format(result.activeAt)} 开始模拟挂单。</p>}
       <p>{simulation?.interval} 历史 OHLC · 人工事后绘图 · 止损和突破优先，同根新单不计止盈。图中成交为估算。</p>
       {frame&&<><div className="grid-report-stats">
        {([['净收益',frame.net],['收益率 %',100*frame.net/config.capital],['最终／当前权益',frame.equity],['最大回撤 %',frame.drawdown],
@@ -377,6 +403,11 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
       <p className="grid-level-info">0° 为水平。角度以整个回放时长和起点箱体高度为基准，缩放图表不会改变参数。</p>
       {channelError&&<p className="grid-error" role="alert">{channelError}</p>}
       <label className="grid-check"><input type="checkbox" checked={precise} onChange={e=>setPrecise(e.target.checked)}/>优先使用 1m 成交回放</label>
+      <div className="grid-box-actions">
+       <button type="button" disabled={busy||!levels.length||!!channelError} onClick={()=>void save('box')}><Save size={15}/>保存箱体</button>
+       <button type="button" disabled={busy||!savedBox} onClick={()=>void restore('box')}>恢复箱体</button>
+       <button type="button" aria-pressed={showData} aria-controls="grid-tradeable-data" disabled={!levels.length||!!channelError||!!result&&!ended} onClick={()=>setShowData(v=>!v)}>{showData?'收起可交易数据':'查看可交易数据'}</button>
+      </div>
       <button className="grid-main-action grid-start" type="button" disabled={busy||!levels.length||!!channelError} onClick={()=>void run()}><Play size={17}/>开始模拟</button>
      </Card>
      <Card title="风控与费用" open={false}>

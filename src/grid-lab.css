@@ -63,3 +63,5 @@ fieldset.grid-side{border:0;padding:0;margin:0}
 .grid-lab .grid-rotate-lower{border:2px solid #67ce9e}
 .grid-lab .grid-rotate-handle:active{cursor:grabbing}
 .grid-lab .grid-rotate-handle:focus-visible{outline:2px solid #ffe199;outline-offset:2px}
+
+.grid-box-actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.grid-box-actions button{font-size:.78rem}

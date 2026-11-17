@@ -58,6 +58,18 @@ export function channelLevels(c:GridConfig,rules:Rules,progress:number){
  return gridLevels({...c,...channelBox(c,progress)},rules);
 }
 
+export function inspectGrid(market:GridMarket,c:GridConfig){
+ const tilted=!!(c.upperAngle||c.lowerAngle),initial=gridLevels(c,market.rules);
+ return market.candles.map(bar=>{
+  const prices=tilted?channelLevels(c,market.rules,(bar.time-market.from)/(market.to-market.from)):initial;
+  const lower=prices[0],upper=prices[prices.length-1];
+  const inside=(price:number)=>price>=lower&&price<=upper;
+  const opensInside=inside(bar.open),closesInside=inside(bar.close);
+  const touches=bar.high>=lower&&bar.low<=upper;
+  return {bar,prices,lower,upper,opensInside,closesInside,touches,contained:bar.low>=lower&&bar.high<=upper};
+ });
+}
+
 type Open={id:number;slot:number;side:Side;qty:number;entry:number;openedAt:number;margin:number;openFee:number;funding:number;best:number;bar:number};
 export type Trade=Omit<Open,'best'|'bar'>&{exit:number;closedAt:number;closeFee:number;fees:number;gross:number;net:number;reason:string};
 export type GridEvent={time:number;price:number;kind:'OPEN'|'CLOSE'|'BREAKOUT'|'STOP';side?:Side;id?:number;net?:number;reason?:string};
@@ -74,8 +86,7 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
   !acceptable(c.fundingRate,-10,10))throw Error('请检查资金、杠杆、费率及风控参数。');
  const endpoint=channelLevels(c,rules,1);
  const minBoundary=Math.min(initialLevels[0],endpoint[0]),maxBoundary=Math.max(initialLevels.at(-1)!,endpoint.at(-1)!);
- const isTilted=!!(c.upperAngle||c.lowerAngle);
- const barLevels=isTilted?candles.map(b=>channelLevels(c,rules,(b.time-market.from)/(market.to-market.from))):null;
+ const coverage=inspectGrid(market,c);
  const minStop=c.stopLower?units(c.stopLower,rules.tick):0,maxStop=c.stopUpper?units(c.stopUpper,rules.tick):0;
  if((c.stopLower&&!(minStop>=rules.minPrice&&minStop>0&&minStop<minBoundary))||(c.stopUpper&&!(maxStop>maxBoundary&&maxStop<=rules.maxPrice)))
   throw Error('硬止损应位于箱体外，且满足合约价格范围。');
@@ -86,7 +97,7 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
  const positions=new Map<number,Open>(),trades:Trade[]=[],frames:Frame[]=[];
  let sequence=0,realized=0,fees=0,fundingNet=0,peak=c.capital,maxDrawdown=0,stops=0,settlement=0,wins=0,rejectedOrders=0;
  let state='RUNNING',entryOff=false,previousUp=false,previousDown=false;
- const pivot=candles[0].open;
+ let activeAt:number|null=null,enteredAt:number|null=null,waitedBars=0,pivot=candles[0].open,pivotLevels=initialLevels;
  const gross=(p:Open,price:number)=>(price-p.entry)*p.qty*(p.side==='LONG'?1:-1);
  const float=(price:number)=>[...positions.values()].reduce((sum,p)=>sum+gross(p,price),0);
  const margin=()=>[...positions.values()].reduce((sum,p)=>sum+p.margin,0);
@@ -103,10 +114,22 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
  };
  for(const [index,b] of candles.entries()){
   if(state==='HALTED'||state==='PAUSED')break;
-  const levels=barLevels?.[index]??initialLevels;
-  const low=levels[0],high=levels.at(-1)!;
+  const {prices:levels,lower:low,upper:high,opensInside,closesInside}=coverage[index];
   const events:GridEvent[]=[];
-  const previous=candles[index-1]?.close??b.open;
+  const wasWaiting=activeAt===null;
+  // An in-range opening price is available immediately. An in-range close only arms the next candle.
+  if(wasWaiting){
+   if(opensInside||enteredAt!==null){
+    activeAt=b.time;pivot=opensInside?b.open:candles[index-1].close;pivotLevels=levels;
+   }else{
+    if(closesInside)enteredAt=b.time+step;
+    waitedBars++;
+    frames.push({time:b.time,price:b.close,equity:c.capital,available:c.capital,margin:0,realized:0,floating:0,
+     net:0,fees:0,funding:0,drawdown:0,open:[],done:0,wins:0,events,state:'WAITING_FOR_BOX'});
+    continue;
+   }
+  }
+  const previous=wasWaiting&&opensInside?b.open:candles[index-1]?.close??b.open;
   while(funding[settlement]&&funding[settlement].time<b.time+step){
    const f=funding[settlement++];
    // Charge observable positions at the candle boundary before any simulated intrabar fill.
@@ -167,7 +190,7 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
      const possible:{slot:number;side:Side;entry:number}[]=[];
      for(let slot=0;slot<levels.length-1;slot++){
       const [lower,upper]=levels.slice(slot,slot+2);
-      const neutralSide=initialLevels[slot+1]<=pivot?'LONG':initialLevels[slot]>=pivot?'SHORT':null;
+      const neutralSide=pivotLevels[slot+1]<=pivot?'LONG':pivotLevels[slot]>=pivot?'SHORT':null;
       const side=c.direction==='NEUTRAL'?neutralSide:c.direction;
       if(!side||positions.has(slot)||closedThisBar.has(slot))continue;
       const entry=side==='LONG'?lower:upper;
@@ -198,7 +221,7 @@ export function simulateGrid(market:GridMarket,c:GridConfig){
    done:trades.length,wins,events,state:reason||state});
  }
  const last=frames[frames.length-1];
- return {frames,trades,last,stops,rejectedOrders,state,best:trades.length?Math.max(...trades.map(p=>p.net)):null,
+ return {frames,trades,last,stops,rejectedOrders,state:activeAt===null?'NO_BOX_ENTRY':state,activeAt,waitedBars,best:trades.length?Math.max(...trades.map(p=>p.net)):null,
   worst:trades.length?Math.min(...trades.map(p=>p.net)):null,returnPct:last.net/c.capital*100};
 }
 export type GridResult=ReturnType<typeof simulateGrid>;
