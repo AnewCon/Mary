@@ -24,16 +24,17 @@ type Props = {
   api: (path: string, body?: unknown) => Promise<unknown>;
   okxPositions: ReactNode;
   onOpenPrediction: () => void;
+  onOpenMartin: () => void;
   onOpenStrategy: () => void;
   performance: Parameters<typeof Performance>[0];
 };
 
-export default function MobileDashboard({ api, okxPositions, performance, onOpenPrediction, onOpenStrategy }: Props) {
+export default function MobileDashboard({ api, okxPositions, performance, onOpenPrediction, onOpenStrategy, onOpenMartin }: Props) {
   const [binanceMode, setBinanceMode] = useState<BinanceAccountMode>('demo');
   const [panel, setPanel] = useState<'positions' | 'earnings'>('positions');
   const [exchange, setExchange] = useState<'okx' | 'binance'>('okx');
   return <section className="phone-dashboard">
-    <div className="okx-views"><button type="button" onClick={onOpenPrediction}>网格实验室</button><button type="button" onClick={onOpenStrategy}>交易策略</button></div>
+    <div className="okx-views"><button type="button" onClick={onOpenPrediction}>网格实验室</button><button type="button" onClick={onOpenMartin}>马丁大师</button><button type="button" onClick={onOpenStrategy}>交易策略</button></div>
     <nav className="phone-primary" aria-label="手机端板块">
       <button type="button" aria-pressed={panel === 'positions'} onClick={() => setPanel('positions')}><Layers size={17}/>仓位</button>
       <button type="button" aria-pressed={panel === 'earnings'} onClick={() => setPanel('earnings')}><BookOpen size={17}/>收益</button>

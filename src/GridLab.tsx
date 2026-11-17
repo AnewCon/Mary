@@ -2,17 +2,15 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChartCandlestick, Download, Lock, Unlock, Play, Pause, RotateCcw, Save, FolderOpen, SkipBack, SkipForward, Undo2, Redo2 } from 'lucide-react';
 import GridChart, { fullTime, type Drawing, type DrawingPoint } from './GridChart';
 import { defaults, channelLevels, channelBox, moveChannelStart, gridLevels, inspectGrid, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
+import { beijingInput as nowInput, parseBeijing as beijing, beijingMidnight, day, loadMarket } from './grid-market-client';
 import './grid-lab.css';
 
 type Api=(path:string)=>Promise<any>;
 type Range={preset:string;from:string;to:string};
 type DrawingState={lower:number;upper:number;upperAngle?:number;lowerAngle?:number;lines:Drawing[]};
 type Scenario={schema:1;symbol:string;interval:string;range:Range;config:GridConfig;drawings:DrawingState;market:GridMarket;simulation?:GridMarket;result?:GridResult};
-const day=86400000;
-const nowInput=(time:number)=>new Date(time+8*3600000).toISOString().slice(0,16);
-const beijing=(value:string)=>Date.parse(value+'+08:00');
 const period=(preset:string):Range=>{
- const now=Date.now(),today=Math.floor((now+8*3600000)/day)*day-8*3600000;
+ const now=Date.now(),today=beijingMidnight(now);
  const start=preset==='yesterday'?today-day:preset==='3d'?today-2*day:preset==='7d'?today-6*day:today;
  return {preset,from:nowInput(start),to:nowInput(preset==='yesterday'?today:now)};
 };
@@ -192,14 +190,12 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
    replaceDrawings({...drawings,lower:Math.min(anchor,value),upper:Math.max(anchor,value),upperAngle:0,lowerAngle:0});setAnchor(null);setTool('PAN');setError('');
   }
  }
- const path=(pair:string,period:Range,cycle:string,funding=false)=>'/grid/market?'+new URLSearchParams({
-  symbol:pair,from:String(beijing(period.from)),to:String(beijing(period.to)),interval:cycle,...(funding?{funding:'1'}:{})
- });
+ const loadRange=(pair:string,period:Range,cycle:string,funding=false)=>loadMarket(api,pair,beijing(period.from),beijing(period.to),cycle,funding);
  async function load(pair=activeSymbol){
   const ordinal=++requestNumber.current;
   clearSimulation();setBusy(true);setError('');setNotice('');
   try{
-   const data:GridMarket=await api(path(pair,range,interval));
+   const data:GridMarket=await loadRange(pair,range,interval);
    if(ordinal!==requestNumber.current)return;
    if(data.symbol!==market?.symbol){setDrawings(initialDrawings);setUndo([]);setRedo([]);setSelected(null);setLocked(false);setTool('PAN');setAnchor(null);}
    setMarket(data);
@@ -227,13 +223,13 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
    let source:GridMarket;
    const actualRange={...range,from:nowInput(market.from),to:nowInput(market.to)};
    if(precise&&market.interval!=='1m'&&market.to-market.from<=7*day){
-    try{source=await api(path(market.symbol,actualRange,'1m',wantFunding));}
+    try{source=await loadRange(market.symbol,actualRange,'1m',wantFunding);}
     catch(err){
-     source=wantFunding?await api(path(market.symbol,actualRange,market.interval,true)):market;
+     source=wantFunding?await loadRange(market.symbol,actualRange,market.interval,true):market;
      if(ordinal===replayNumber.current)setNotice('1m 历史行情不可用，已使用 '+source.interval+' 保守回放（'+explain(err)+'）。');
     }
    }else{
-    source=wantFunding&&!market.funding?await api(path(market.symbol,actualRange,market.interval,true)):market;
+    source=wantFunding&&!market.funding?await loadRange(market.symbol,actualRange,market.interval,true):market;
     if(precise&&market.interval!=='1m'&&market.to-market.from>7*day)setNotice('所选区间超过 1m 模拟上限，使用 '+market.interval+' 保守回放。');
    }
    if(ordinal!==replayNumber.current)return;

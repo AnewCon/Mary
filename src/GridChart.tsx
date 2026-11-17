@@ -15,15 +15,16 @@ function segmentDistance(x:number,y:number,x1:number,y1:number,x2:number,y2:numb
  const fraction=Math.max(0,Math.min(1,((x-x1)*dx+(y-y1)*dy)/(dx*dx+dy*dy||1)));
  return Math.hypot(x-(x1+dx*fraction),y-(y1+dy*fraction));
 }
-type Props={bars:Candle[];tick:string;step:number;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
+export type ReferenceLine={id:string;label:string;price:number;color:string;draggable?:boolean};
+type Props={referenceLines?:ReferenceLine[];onReferenceDrag?:(id:string,price:number)=>void;bars:Candle[];tick:string;step:number;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
  tool:'PAN'|'LINE'|'BOX'|'SEGMENT'|'ANGLE';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;onSegment:(segment:Segment)=>void;
- onDrag:(which:'upper'|'lower',price:number,commit:boolean,angleTime?:number,end?:End)=>void; angled:boolean; levelsAt?:(time:number)=>number[]};
+ onDrag:(which:'upper'|'lower',price:number,commit:boolean,angleTime?:number,end?:End)=>void; angled?:boolean; levelsAt?:(time:number)=>number[]};
 const axisTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export const fullTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export default function GridChart(p:Props){
  const canvas=useRef<HTMLCanvasElement>(null);
  const geom=useRef<{left:number;right:number;top:number;bottom:number;index:(x:number)=>number;price:(y:number)=>number;y:(price:number)=>number;timeAt:(x:number)=>number;timeX:(time:number)=>number}|null>(null);
- const drag=useRef<{which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;angleTime?:number;moving?:boolean;segment?:DrawingPoint}|null>(null);
+ const drag=useRef<{reference?:string;which?:'upper'|'lower';x:number;end:number;price?:number;toPrice?:(y:number)=>number;angleTime?:number;moving?:boolean;segment?:DrawingPoint}|null>(null);
  const [size,setSize]=useState({width:0,height:0});
  const [zoom,setZoom]=useState(110),[offset,setOffset]=useState(0);
  const [handles,setHandles]=useState<Handle[]>([]);
@@ -55,7 +56,7 @@ export default function GridChart(p:Props){
   const right=width-81,left=10,top=19,bottom=height-91,volumeBottom=height-23;
   const visible=Math.max(viewed.length,8),dx=(right-left)/visible;
   const gridByBar=p.levelsAt?viewed.map(bar=>p.levelsAt!(bar.time)):null;
-  const prices=[...viewed.flatMap(b=>[b.low,b.high]),...(gridByBar?gridByBar.flat():p.levels)];
+  const prices=[...viewed.flatMap(b=>[b.low,b.high]),...(gridByBar?gridByBar.flat():p.levels),...((p.referenceLines??[]).map(line=>line.price))];
   const lower=Math.min(...prices),upper=Math.max(...prices);
   const pad=(upper-lower||upper*.002)*.075;
   const min=lower-pad,max=upper+pad;
@@ -170,6 +171,18 @@ export default function GridChart(p:Props){
     ctx.fillStyle=color;ctx.fillText(which,px-4,yy-4);
    }
   }
+  const referenceLevels=[...(p.referenceLines??[])].sort((a,b)=>y(a.price)-y(b.price));
+  let labelY=top-14;
+  ctx.font='bold 10px system-ui';
+  for(const ref of referenceLevels){
+   mark(ref.price,ref.color,ref.draggable?[]:[4,4],ref.draggable);
+   const at=Math.min(bottom+12,Math.max(y(ref.price),labelY+13));
+   labelY=at;
+   const boxWidth=ctx.measureText(ref.label).width+10;
+   ctx.fillStyle='#18282b';ctx.fillRect(right-boxWidth-5,at-12,boxWidth,13);
+   ctx.fillStyle=ref.color;ctx.fillText(ref.label,right-boxWidth,at-2);
+  }
+  ctx.font='11px system-ui';
   if(p.frame){
    const py=y(p.frame.price);
    if(py>=top&&py<=bottom){
@@ -197,6 +210,11 @@ export default function GridChart(p:Props){
   if(!g)return;
   setCursor(pos);
   if(!d)return;
+  if(d.reference){
+   const price=(d.toPrice??g.price)(pos.y);
+   d.moving=true;p.onReferenceDrag?.(d.reference,Math.max(Number(p.tick),price));
+   return;
+  }
   if(d.segment){
    const end=drawingPoint(pos,g);
    if(e.shiftKey)end.price=d.segment.price;
@@ -222,6 +240,13 @@ export default function GridChart(p:Props){
    e.currentTarget.setPointerCapture(e.pointerId);
    return;
   }
+  const ref=p.tool==='PAN'&&!p.locked?[...(p.referenceLines??[])].reverse()
+   .find(line=>line.draggable&&Math.abs(pos.y-g.y(line.price))<9):undefined;
+  if(ref){
+   drag.current={x:pos.x,end:offset,reference:ref.id,toPrice:g.price};
+   e.currentTarget.setPointerCapture(e.pointerId);
+   return;
+  }
   const at=viewed[g.index(pos.x)]?.time;
   const levels=(p.levelsAt&&at!==undefined?p.levelsAt(at):p.levels);
   const upper=levels.at(-1),lower=levels[0];
@@ -233,7 +258,7 @@ export default function GridChart(p:Props){
  }
  function up(e:ReactPointerEvent<HTMLCanvasElement>){
   const d=drag.current,g=geom.current,pos=position(e);drag.current=null;
-  if(!d||!g)return;
+  if(!d||!g||d.reference)return;
   if(d.segment){
    setPreview(null);
    const end=drawingPoint(pos,g);

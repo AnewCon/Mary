@@ -1,0 +1,7 @@
+.martin-head{display:flex;align-items:center;gap:12px;padding:14px 4px;color:#e4eede}
+.martin-head svg{color:#e7c88e}
+.martin-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:6px;margin:10px 0}
+.martin-facts div{padding:7px;border:1px solid var(--grid-border);border-radius:5px}
+.martin-facts dt{color:var(--grid-muted);font-size:.76rem}.martin-facts dd{margin:2px 0 0;font-variant-numeric:tabular-nums;font-weight:650}
+.martin-triggers{display:grid;gap:5px;margin:8px 0}.martin-triggers div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:6px}
+.martin-lab .grid-form{margin:9px 0}.martin-note{font-size:.76rem}
