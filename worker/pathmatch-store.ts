@@ -39,7 +39,7 @@ export async function predictionReference(relay:DurableObjectStub,symbol:unknown
   const now=Date.now();
   const latest=(await candles(relay,symbol,'1m','limit=3',now)).at(-1);
   if(!latest||latest.time+minute!==Math.floor(now/minute)*minute)throw new Failure('PATHMATCH_REFERENCE_STALE',502);
-  return {symbol,exchange:'BINANCE_DEMO',referenceTime:latest.time+minute,referencePrice:latest.close,asOf:now};
+  return {symbol,exchange:'BINANCE_DEMO',referenceTime:latest.time+minute,referencePrice:latest.close,suggestedStartAt:latest.time+2*minute,asOf:now};
 }
 
 export async function createPrediction(db:D1Database,body:any){
@@ -50,6 +50,7 @@ export async function createPrediction(db:D1Database,body:any){
     return view(previous);
   }
   const created=Date.now(),plan=parsePlan(body?.plan,created);
+  if(plan.forecast.interval!=='1m')throw new Failure('PATHMATCH_15_MINUTE_OHLC_REQUIRED');
   await db.prepare(`INSERT OR IGNORE INTO pathmatch_predictions(id,payload,symbol,version,state,created_at,expires_at)
     VALUES(?,?,?,?,'DRAFT',?,?)`).bind(id,JSON.stringify(plan),plan.symbol,plan.strategyVersion,created,plan.expiresAt).run();
   const stored=await get(db,id);
@@ -77,8 +78,10 @@ export async function armPrediction(db:D1Database,relay:DurableObjectStub,body:a
     throw new Failure('PATHMATCH_REFERENCE_MISMATCH',409);
   if(Math.abs(base.close-bars.at(-1)!.close)>2*atr)throw new Failure('PATHMATCH_REFERENCE_PRICE_JUMP',409);
   const start=Math.ceil(locked/minute)*minute;
+  if(plan.forecast.interval==='1m'&&start!==plan.forecast.candles[0].time)
+    throw new Failure('PATHMATCH_FORECAST_START_MISMATCH',409);
   const end=Math.min(row.expires_at,start+plan.validation.maximumValidationMinutes*minute);
-  if(end-start<plan.validation.minimumClosed1mCandles*minute)throw new Failure('PATHMATCH_WINDOW_TOO_SHORT',409);
+  if(end-start<(plan.forecast.interval==='1m'?15:plan.validation.minimumClosed1mCandles)*minute)throw new Failure('PATHMATCH_WINDOW_TOO_SHORT',409);
   const updated=await db.prepare(`UPDATE pathmatch_predictions SET state='ARMED',locked_at=?,start_at=?,atr=?,expires_at=?,revision=revision+1
     WHERE id=? AND revision=? AND state='DRAFT' AND (SELECT COUNT(*) FROM pathmatch_predictions
       WHERE state IN ('ARMED','VALIDATING') AND expires_at>?)<5`).bind(locked,start,atr,end,row.id,row.revision,locked).run();
@@ -149,7 +152,8 @@ export async function monitorPredictions(db:D1Database,relay:DurableObjectStub,n
     }catch(error){
       result={...(row.result?JSON.parse(row.result):{}),reason:error instanceof Failure?error.code:'PATHMATCH_UPSTREAM_UNAVAILABLE'};
     }
-    if(now>=row.expires_at&&state!=='CANCELED'){
+    const grace=plan.forecast.interval==='1m'?75000:0;
+    if(now>=row.expires_at+grace&&state!=='CANCELED'&&state!=='COMPLETED'){
       state='EXPIRED';result={...result,lastObservation:result.reason,reason:'WINDOW_EXPIRED'};
     }
     await db.prepare("UPDATE pathmatch_predictions SET state=?,result=?,last_check=?,revision=revision+1 WHERE id=? AND revision=? AND state IN ('ARMED','VALIDATING')")

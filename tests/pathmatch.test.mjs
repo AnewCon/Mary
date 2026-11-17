@@ -71,14 +71,41 @@ function relay(now,onRequest){
    }));
  }};
 }
+const fullPlan={...plan,expiresAt:start+15*M,forecast:{interval:'1m',candles:candles(Array(15).fill(100))},
+  validation:{...plan.validation,maximumValidationMinutes:15}};
+test('15 one-minute OHLC rows lock to the supplied next-minute start',()=>{
+ assert.equal(parsePlan(fullPlan,start-1000).forecast.candles.length,15);
+ assert.throws(()=>parsePlan({...fullPlan,forecast:{...fullPlan.forecast,candles:fullPlan.forecast.candles.slice(1)}},start-1000));
+ assert.throws(()=>parsePlan({...fullPlan,expiresAt:start+14*M},start-1000));
+});
+test('provisional fit never decides early, perfect 15-minute fit reaches review',()=>{
+ const near=candles(Array(15).fill(100));
+ const partial=match(fullPlan,start,1,near.slice(0,14),start+14*M);
+ assert.equal(partial.decision,'WAIT');assert.equal(partial.complete,false);
+ assert.equal(partial.fit.similarity,100);
+ const final=match(fullPlan,start,1,near,start+15*M);
+ assert.equal(final.status,'COMPLETED');assert.equal(final.decision,'REVIEW');
+ assert.equal(final.fit.rangeOverlap,100);assert.equal(final.fit.trendSimilarity,100);
+});
+test('calculated overlap is interval intersection over union and a hard stop veto persists',()=>{
+ const typical=candles(Array(15).fill(100));
+ const one={...typical[0],low:99.7,high:100.4};
+ const part=match(fullPlan,start,1,[one],start+M);
+ assert.ok(Math.abs(part.fit.rangeOverlap-40)<1e-6);
+ const disturbed=typical.map(row=>({...row}));
+ disturbed[0].low=90;
+ const final=match(fullPlan,start,1,disturbed,start+15*M);
+ assert.equal(final.complete,true);assert.equal(final.decision,'WAIT');assert.equal(final.veto,'HARD_INVALIDATION');
+ assert.equal(final.points.length,15);
+});
 test('draft replay, immutability, authenticated shadow arm and cancellation',async(t)=>{
  const now=start-10000;
  t.mock.method(Date,'now',()=>now);
- const database=db(),id='a'.repeat(32),input={id,plan};
+ const database=db(),id='a'.repeat(32),input={id,plan:fullPlan};
  const first=await createPrediction(database,input);
  assert.equal(first.state,'DRAFT');
  assert.deepEqual(await createPrediction(database,input),first);
- await assert.rejects(createPrediction(database,{id,plan:{...plan,source:'edited'}}),/PATHMATCH_ID_CONFLICT/);
+ await assert.rejects(createPrediction(database,{id,plan:{...fullPlan,source:'edited'}}),/PATHMATCH_ID_CONFLICT/);
  await assert.rejects(armPrediction(database,relay(now),{id,mode:'DEMO_AUTO',confirm:true}),/PATHMATCH_SHADOW_AUTHORIZATION_REQUIRED/);
  const locked=await armPrediction(database,relay(now),{id,mode:'SHADOW',confirm:true});
  assert.equal(locked.startAt,start);
@@ -92,15 +119,15 @@ test('D1 survives worker restart, symbol gets one upstream query, expiry cannot 
  t.mock.method(Date,'now',()=>now);
  const database=db(),ids=['b'.repeat(32),'c'.repeat(32)];
  for(const id of ids){
-  await createPrediction(database,{id,plan});
+  await createPrediction(database,{id,plan:fullPlan});
   await armPrediction(database,relay(now),{id,mode:'SHADOW',confirm:true});
  }
  let calls=0;
  await monitorPredictions(database,relay(start+2*M,()=>calls++),start+2*M);
  assert.equal(calls,1);
  assert.equal((await predictionStatus(database,ids[0])).result.points.length,2);
- await monitorPredictions(database,relay(start+5*M),start+5*M);
+ await monitorPredictions(database,relay(start+15*M),start+15*M);
  const result=await predictionStatus(database,ids[0]);
- assert.ok(['EXPIRED','CANCELED'].includes(result.state));
+ assert.equal(result.state,'COMPLETED');
  assert.equal(result.execution,'DISABLED_PENDING_INDEPENDENT_ACCEPTANCE');
 });

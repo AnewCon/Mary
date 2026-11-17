@@ -5,9 +5,9 @@ import './pathmatch.css';
 
 type Point=Candle&{expected:number;lower:number;upper:number;similarity:number};
 type Prediction={id:string;symbol:string;state:string;mode:string;startAt:number|null;expiresAt:number;createdAt:number;atr:number|null;
-  plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[]}|null};
+  plan:Plan;result:{reason?:string;similarity?:number|null;points?:Point[];fit?:{pathSimilarity:number;rangeOverlap:number;trendSimilarity:number;similarity:number};complete?:boolean;veto?:string|null;decision?:string}|null};
 const stamp=(value:number)=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
-const states:Record<string,string>={DRAFT:'草稿',ARMED:'已锁定',VALIDATING:'观测中',CANCELED:'已取消',EXPIRED:'已到期'};
+const states:Record<string,string>={DRAFT:'草稿',ARMED:'已锁定',VALIDATING:'观测中',CANCELED:'已取消',EXPIRED:'已到期',COMPLETED:'拟合完成'};
 
 function Chart({row}:{row:Prediction}){
   const canvas=useRef<HTMLCanvasElement>(null);
@@ -34,27 +34,36 @@ function Chart({row}:{row:Prediction}){
         context.strokeStyle='#d8e4dc';context.beginPath();context.moveTo(x(0),y(px));context.lineTo(x(15),y(px));context.stroke();
         context.fillStyle='#486459';context.fillText(px.toPrecision(5),x(15)+5,y(px)+4);
       }
-      context.fillStyle='rgba(90,120,167,.16)';
-      plan.forecast.candles.forEach((bar,i)=>{
-        context.fillRect(x(i*5),y(bar.high+tolerance),x(5)-x(0),y(bar.low-tolerance)-y(bar.high+tolerance));
-        context.fillStyle='#486459';context.fillText('+'+(i+1)*5+'m',x((i+1)*5)-17,height-9);
-        context.fillStyle='rgba(90,120,167,.16)';
+      const candles=plan.forecast.candles;
+      const minuteForecast=plan.forecast.interval==='1m';
+      const step=minuteForecast?1:5;
+      for(let i=0;i<3;i++){
+        const minute=(i+1)*5;
+        context.strokeStyle='#dce6e0';context.beginPath();context.moveTo(x(minute),18);context.lineTo(x(minute),height-22);context.stroke();
+        context.fillStyle='#486459';context.fillText('+'+minute+'m',x(minute)-17,height-8);
+      }
+      const draw=(bar:Omit<Candle,'time'>,index:number,w:number,outline:boolean)=>{
+        const column=x(index),top=Math.min(y(bar.open),y(bar.close)),body=Math.max(2,Math.abs(y(bar.open)-y(bar.close)));
+        context.strokeStyle=bar.close>=bar.open?'#27755d':'#a04046';context.fillStyle=context.strokeStyle;
+        context.beginPath();context.moveTo(column,y(bar.high));context.lineTo(column,y(bar.low));context.stroke();
+        if(outline){context.fillStyle='#f6faf6';context.fillRect(column-w/2,top,w,body);context.strokeRect(column-w/2,top,w,body);}
+        else context.fillRect(column-w/2,top,w,body);
+      };
+      const candleWidth=Math.max(2,Math.min(10,(x(1)-x(0))*0.34));
+      candles.forEach((bar,i)=>{
+        const open='open' in bar?bar.open:(i===0?plan.referencePrice:candles[i-1].close);
+        const center=i*step+step/2-(minuteForecast?0.19:0.05);
+        draw({...bar,open},center,candleWidth,true);
       });
-      context.strokeStyle='#496cad';context.setLineDash([5,4]);context.beginPath();
-      context.moveTo(x(0),y(plan.referencePrice));
-      plan.forecast.candles.forEach((bar,i)=>context.lineTo(x(5*(i+1)),y(bar.close)));
-      context.stroke();context.setLineDash([]);
       for(const point of actual){
-        const index=(point.time-(row.startAt??point.time))/60000+1;
-        context.strokeStyle=point.close>=point.open?'#27755d':'#a04046';
-        context.beginPath();context.moveTo(x(index),y(point.high));context.lineTo(x(index),y(point.low));context.stroke();
-        context.fillStyle=context.strokeStyle;context.fillRect(x(index)-2,Math.min(y(point.open),y(point.close)),4,Math.max(2,Math.abs(y(point.open)-y(point.close))));
+        const index=(point.time-(row.startAt??point.time))/60000+0.5+(minuteForecast?0.19:0);
+        draw(point,index,candleWidth,false);
       }
     };
     const observer=new ResizeObserver(chart);observer.observe(target);chart();
     return ()=>observer.disconnect();
   },[row]);
-  return <canvas ref={canvas} className="pathmatch-chart" aria-label="预测参考线、价格区间及真实已收盘分钟 K 线"/>;
+  return <canvas ref={canvas} className="pathmatch-chart" aria-label="预测与真实已收盘蜡烛图，共用时间和价格坐标"/>;
 }
 
 export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promise<any>}){
@@ -71,7 +80,7 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
   const watching=row&&['ARMED','VALIDATING'].includes(row.state);
   useEffect(()=>{
     if(!watching)return;
-    const timer=window.setInterval(()=>void load(),15000);
+    const timer=window.setInterval(()=>void load(),60000);
     return ()=>clearInterval(timer);
   },[watching,api]);
   return <section className="pathmatch-workspace">
@@ -88,8 +97,15 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
         <div className="panelhead"><div><h2>{row.symbol} · {row.plan.direction==='LONG'?'多头':'空头'}</h2><p>{states[row.state]??row.state} · {row.id}</p></div>
           <span className="badge">{row.result?.similarity==null?'相似率待计算':row.result.similarity.toFixed(1)+'% 相似率'}</span></div>
         <div className="pathmatch-inner">
-          <p className="pathmatch-legend"><span>⋯ 预测参考线</span><span>■ 容许价区</span><span>▮ 已收盘 1m</span></p>
+          <p className="pathmatch-legend"><span>□ 预测蜡烛</span><span>■ 实际已收盘 1m</span></p>
           <Chart row={row}/>
+          {row.plan.forecast.interval==='5m'&&<p>历史计划 · 三根 5 分钟预测，开盘价按上一根预测收盘价绘制。</p>}
+          {row.plan.forecast.interval==='1m'&&<div className="pathmatch-fit">
+            {([['轨迹相似度','pathSimilarity'],['高低区间重合度','rangeOverlap'],['趋势一致度','trendSimilarity'],['综合拟合度','similarity']] as const).map(([label,key])=>
+              <div key={key}><span>{label}</span><b>{row.result?.fit?.[key]?.toFixed(1)??'—'}{row.result?.fit?'%':''}</b></div>)}
+            <p>已收盘 {row.result?.points?.length??0}/15 {row.result?.complete?' · 最终结果':watching?' · 观察中':' · 未形成最终结果'}
+              {row.result?.decision==='REVIEW'?' · 待复核':' · WAIT'}{row.result?.veto?' · 已触发硬性失效':''}</p>
+          </div>}
           <dl className="pathmatch-facts">
             <div><dt>剩余验证时间</dt><dd>{watching?Math.max(0,Math.ceil((row.expiresAt-now)/1000))+' 秒':'—'}</dd></div>
             <div><dt>入场范围</dt><dd>{row.plan.entry.priceMin} – {row.plan.entry.priceMax}</dd></div>
@@ -98,7 +114,9 @@ export default function PathMatch({api}:{api:(path:string,body?:unknown)=>Promis
             <div><dt>模拟订单</dt><dd>影子观察</dd></div>
           </dl>
           {row.result?.reason&&<p>最新结果 · {row.result.reason}</p>}
-          <div className="pathmatch-forecast">{row.plan.forecast.candles.map((bar,i)=><div key={i}><strong>第 {i+1} 根 5m</strong><small>收盘 {bar.close} · {bar.low}–{bar.high}</small></div>)}</div>
+          <details><summary>预测 OHLC 明细</summary><div className="pathmatch-forecast">{row.plan.forecast.candles.map((bar,i)=>
+            <div key={i}><strong>第 {i+1} 根 {row.plan.forecast.interval}</strong>
+            <small>{'open' in bar?'开 '+bar.open+' · ':''}高 {bar.high} · 低 {bar.low} · 收 {bar.close}</small></div>)}</div></details>
         </div>
       </div>
     </div>}
