@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChartCandlestick, Download, Lock, Unlock, Play, Pause, RotateCcw, Save, FolderOpen, SkipBack, SkipForward, Undo2, Redo2 } from 'lucide-react';
 import GridChart, { fullTime, type Drawing, type DrawingPoint } from './GridChart';
-import { defaults, channelLevels, channelBox, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
+import { defaults, channelLevels, channelBox, moveChannelStart, gridLevels, priceFormat, simulateGrid, snapPrice, type GridConfig, type GridMarket, type GridResult } from './grid-engine';
 import './grid-lab.css';
 
 type Api=(path:string)=>Promise<any>;
@@ -139,10 +139,21 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
    replaceDrawings(next,dragStart.current??drawings);dragStart.current=null;
   }else{if(!dragStart.current)dragStart.current=drawings;setDrawings(next);}
  }
- function box(which:'upper'|'lower',value:number,commit=true,angleTime?:number){
+ function box(which:'upper'|'lower',value:number,commit=true,angleTime?:number,rotationEnd?:'left'|'right'){
   if(!market||locked||result||busy)return;
   if(angleTime!==undefined){
    const fraction=(angleTime-market.from)/(market.to-market.from);
+   if(rotationEnd==='left'){
+    const prior=dragStart.current??drawings;
+    try{
+     const next={...prior,...moveChannelStart({...config,...prior},market.rules,which,value,fraction)};
+     if(commit){replaceDrawings(next,prior);dragStart.current=null;}
+     else{dragStart.current=prior;setDrawings(next);}
+    }catch{
+     if(commit&&dragStart.current){replaceDrawings(drawings,prior);dragStart.current=null;}
+    }
+    return;
+   }
    if(fraction<=0.005||drawings.upper<=drawings.lower)return;
    const degrees=Math.atan((value-drawings[which])/((drawings.upper-drawings.lower)*fraction))*180/Math.PI;
    angle(which,degrees,commit);
@@ -353,8 +364,8 @@ export default function GridLab({api,onOpenPrediction}:{api:Api;onOpenPrediction
        <Pick label="间距" value={config.spacing} options={([['LINEAR','等差'],['GEOMETRIC','等比']])} change={v=>change('spacing',v as GridConfig['spacing'])}/>
        <NumberField label="上限" value={drawings.upper} onChange={n=>box('upper',n)} step={Number(market.rules.tick)}/>
        <NumberField label="下限" value={drawings.lower} onChange={n=>box('lower',n)} step={Number(market.rules.tick)}/>
-       <NumberField label="上沿角度 °" value={drawings.upperAngle??0} onChange={n=>angle('upper',n)} min={-80} step={0.1}/>
-       <NumberField label="下沿角度 °" value={drawings.lowerAngle??0} onChange={n=>angle('lower',n)} min={-80} step={0.1}/>
+       <NumberField label="上沿角度 °" value={Number((drawings.upperAngle??0).toFixed(2))} onChange={n=>angle('upper',n)} min={-80} step={0.01}/>
+       <NumberField label="下沿角度 °" value={Number((drawings.lowerAngle??0).toFixed(2))} onChange={n=>angle('lower',n)} min={-80} step={0.01}/>
        <NumberField label="网格数量" value={config.count} onChange={n=>change('count',n)} min={2} step={1}/>
        <NumberField label="初始资金（USDT）" value={config.capital} onChange={n=>change('capital',n)}/>
        <NumberField label="杠杆倍数" value={config.leverage} onChange={n=>change('leverage',n)} min={1} step={1}/>

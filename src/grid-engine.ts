@@ -40,6 +40,20 @@ export function channelBox(c:Pick<GridConfig,'lower'|'upper'|'upperAngle'|'lower
  if(![upperAngle,lowerAngle].every(x=>Number.isFinite(x)&&Math.abs(x)<=80))throw Error('角度须在 -80° 到 80° 之间。');
  return {lower:c.lower+shift(lowerAngle),upper:c.upper+shift(upperAngle)};
 }
+export function moveChannelStart(c:GridConfig,rules:Rules,edge:'upper'|'lower',price:number,progress:number){
+ if(!Number.isFinite(price)||progress<0||progress>=.995)throw Error('请在靠近左端的位置调整。');
+ const end=channelBox(c,1);
+ const start=units((price-progress*end[edge])/(1-progress),rules.tick);
+ const next={...c,[edge]:start};
+ const height=next.upper-next.lower;
+ if(height<=0)throw Error('箱体上下沿不能交叉。');
+ const degrees=(shift:number)=>Math.atan(shift/height)*180/Math.PI;
+ next.upperAngle=degrees(end.upper-next.upper);
+ next.lowerAngle=degrees(end.lower-next.lower);
+ channelLevels(next,rules,0);
+ channelLevels(next,rules,1);
+ return {upper:next.upper,lower:next.lower,upperAngle:next.upperAngle,lowerAngle:next.lowerAngle};
+}
 export function channelLevels(c:GridConfig,rules:Rules,progress:number){
  return gridLevels({...c,...channelBox(c,progress)},rules);
 }

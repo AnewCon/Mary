@@ -5,7 +5,7 @@ async function bundle(entry){
  const {outputFiles:[out]}=await build({entryPoints:[entry],bundle:true,format:'esm',platform:'node',write:false});
  return import('data:text/javascript;base64,'+Buffer.from(out.text).toString('base64'));
 }
-const {defaults,channelLevels,gridLevels,simulateGrid}=await bundle('src/grid-engine.ts');
+const {defaults,channelBox,channelLevels,moveChannelStart,gridLevels,simulateGrid}=await bundle('src/grid-engine.ts');
 const {gridMarket}=await bundle('worker/grid-market.ts');
 const base=1794873600000, minute=60000;
 const rules={tick:'0.01',quantityStep:'0.001',minQty:.001,maxQty:50000,minNotional:5,minPrice:.01,maxPrice:100000,marketMinQty:.001};
@@ -104,4 +104,18 @@ test('independent slopes project prices per candle and reject crossing boundarie
  assert.equal(ordinary.frames[1].open[0].entry,105);
  assert.equal(shifted.frames[1].open[0]?.entry,102.89);
  assert.equal(ordinary.frames[0].events.length,shifted.frames[0].events.length);
+});
+
+test('moving the left boundary preserves both right endpoint prices',()=>{
+ const base={...config,upperAngle:20,lowerAngle:-10};
+ const initialEnd=channelBox(base,1);
+ const moved=moveChannelStart(base,rules,'upper',115,0);
+ assert.equal(moved.upper,115);
+ assert.equal(moved.lower,base.lower);
+ const nextEnd=channelBox(moved,1);
+ assert.ok(Math.abs(nextEnd.upper-initialEnd.upper)<1e-9);
+ assert.ok(Math.abs(nextEnd.lower-initialEnd.lower)<1e-9);
+ const right=channelBox(moveChannelStart(base,rules,'lower',96,.25),1);
+ assert.ok(Math.abs(right.lower-initialEnd.lower)<1e-9);
+ assert.throws(()=>moveChannelStart(base,rules,'upper',base.lower-1,0),/交叉/);
 });

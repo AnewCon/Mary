@@ -4,8 +4,9 @@ import { priceFormat, type Candle, type Frame } from './grid-engine';
 
 export type DrawingPoint={time:number;price:number};
 type Edge='upper'|'lower';
-type Handle={edge:Edge;time:number;left:number;top:number;levelY:number};
-type Rotation={pointer:number;edge:Edge;time:number;startY:number;originY:number;toPrice:(y:number)=>number;moved:boolean};
+type End='left'|'right';
+type Handle={edge:Edge;end:End;time:number;left:number;top:number;levelY:number};
+type Rotation={pointer:number;edge:Edge;end:End;time:number;startY:number;originY:number;toPrice:(y:number)=>number;moved:boolean};
 type Segment={start:DrawingPoint;end:DrawingPoint};
 export type Drawing={id:number;price:number}|({id:number}&Segment);
 
@@ -16,7 +17,7 @@ function segmentDistance(x:number,y:number,x1:number,y1:number,x2:number,y2:numb
 }
 type Props={bars:Candle[];tick:string;step:number;levels:number[];stops:number[];lines:Drawing[];selected:number|null;locked:boolean;
  tool:'PAN'|'LINE'|'BOX'|'SEGMENT'|'ANGLE';anchor:number|null;frame?:Frame;frames?:Frame[];onPrice:(price:number)=>void;onSelect:(id:number)=>void;onSegment:(segment:Segment)=>void;
- onDrag:(which:'upper'|'lower',price:number,commit:boolean,angleTime?:number)=>void; angled:boolean; levelsAt?:(time:number)=>number[]};
+ onDrag:(which:'upper'|'lower',price:number,commit:boolean,angleTime?:number,end?:End)=>void; angled:boolean; levelsAt?:(time:number)=>number[]};
 const axisTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export const fullTime=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export default function GridChart(p:Props){
@@ -68,16 +69,21 @@ export default function GridChart(p:Props){
   const lastGrid=gridByBar?.at(-1)??p.levels;
   let nextHandles:Handle[]=[];
   if(viewed.length>1&&lastGrid.length&& !p.locked&&(p.tool==='PAN'||p.tool==='ANGLE')){
-   const time=viewed[viewed.length-1].time;
-   const upperY=y(lastGrid[lastGrid.length-1]),lowerY=y(lastGrid[0]);
-   const nearby=Math.abs(upperY-lowerY)<30;
-   nextHandles=([{edge:'upper',levelY:upperY},{edge:'lower',levelY:lowerY}] as const).map(({edge,levelY})=>({
-    edge,time,levelY,left:Math.max(left+15,Math.min(right-16,x(viewed.length-1))-(nearby&&edge==='lower'?31:0)),
-    top:Math.max(top+3,Math.min(bottom-3,levelY))
-   }));
+   nextHandles=(['left','right'] as const).flatMap(end=>{
+    const index=end==='left'?0:viewed.length-1;
+    const tickLevels=end==='left'?gridByBar?.[0]??p.levels:lastGrid;
+    const upperY=y(tickLevels[tickLevels.length-1]),lowerY=y(tickLevels[0]);
+    const nearby=Math.abs(upperY-lowerY)<30;
+    const time=viewed[index].time;
+    return ([{edge:'upper',levelY:upperY},{edge:'lower',levelY:lowerY}] as const).map(({edge,levelY})=>{
+     const spread=nearby&&edge==='lower'?(end==='left'?31:-31):0;
+     return {edge,end,time,levelY,left:Math.min(right-16,Math.max(left+15,x(index))+spread),
+      top:Math.max(top+3,Math.min(bottom-3,levelY))};
+    });
+   });
   }
   setHandles(current=>current.length===nextHandles.length&&current.every((h,i)=>
-   h.edge===nextHandles[i].edge&&h.time===nextHandles[i].time&&h.left===nextHandles[i].left&&h.top===nextHandles[i].top&&h.levelY===nextHandles[i].levelY)?current:nextHandles);
+   h.edge===nextHandles[i].edge&&h.end===nextHandles[i].end&&h.time===nextHandles[i].time&&h.left===nextHandles[i].left&&h.top===nextHandles[i].top&&h.levelY===nextHandles[i].levelY)?current:nextHandles);
   const line=(x1:number,y1:number,x2:number,y2:number,color:string)=>{ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
   for(let i=0;i<=5;i++){
    const yy=top+(bottom-top)*i/5;
@@ -245,8 +251,8 @@ export default function GridChart(p:Props){
  }
  function rotateStart(e:ReactPointerEvent<HTMLButtonElement>,handle:Handle){
   if(e.button!==0||!e.isPrimary||p.locked||!geom.current)return;
-  const {edge,time,levelY}=handle;
-  rotation.current={pointer:e.pointerId,edge,time,startY:e.clientY,originY:levelY,toPrice:geom.current.price,moved:false};
+  const {edge,end,time,levelY}=handle;
+  rotation.current={pointer:e.pointerId,edge,end,time,startY:e.clientY,originY:levelY,toPrice:geom.current.price,moved:false};
   e.currentTarget.setPointerCapture(e.pointerId);
  }
  function rotateMove(e:ReactPointerEvent<HTMLButtonElement>){
@@ -255,13 +261,13 @@ export default function GridChart(p:Props){
   const delta=e.clientY-r.startY;
   if(!r.moved&&Math.abs(delta)<2)return;
   r.moved=true;
-  p.onDrag(r.edge,r.toPrice(r.originY+delta),false,r.time);
+  p.onDrag(r.edge,r.toPrice(r.originY+delta),false,r.time,r.end);
  }
  function rotateEnd(e:ReactPointerEvent<HTMLButtonElement>){
   const r=rotation.current;
   if(!r||e.pointerId!==r.pointer)return;
   rotation.current=null;
-  if(r.moved)p.onDrag(r.edge,r.toPrice(r.originY+e.clientY-r.startY),true,r.time);
+  if(r.moved)p.onDrag(r.edge,r.toPrice(r.originY+e.clientY-r.startY),true,r.time,r.end);
  }
  const hovered=cursor&&geom.current&&viewed[geom.current.index(cursor.x)];
  const candle=hovered||viewed.at(-1);
@@ -272,15 +278,15 @@ export default function GridChart(p:Props){
   <canvas aria-label="历史蜡烛图与成交量" ref={canvas} className={'grid-chart grid-tool-'+p.tool.toLowerCase()}
    onPointerMove={move} onPointerDown={down} onPointerUp={up} onPointerLeave={()=>setCursor(null)}
    onPointerCancel={()=>{if(drag.current?.which&&drag.current.price!==undefined)p.onDrag(drag.current.which,drag.current.price,true,drag.current.angleTime);drag.current=null;setPreview(null);}}/>
-  {handles.map(h=><button type="button" key={h.edge} className={'grid-rotate-handle grid-rotate-'+h.edge}
-   style={{left:h.left,top:h.top}} aria-label={h.edge==='upper'?'旋转上沿':'旋转下沿'}
-   title={h.edge==='upper'?'按住拖动旋转上沿':'按住拖动旋转下沿'}
+  {handles.map(h=><button type="button" key={h.edge+h.end} className={'grid-rotate-handle grid-rotate-'+h.edge}
+   style={{left:h.left,top:h.top}} aria-label={`旋转${h.edge==='upper'?'上沿':'下沿'}${h.end==='left'?'左端':'右端'}`}
+   title={h.end==='left'?'拖动左端，固定右端':'拖动右端，固定左端'}
    onPointerDown={e=>rotateStart(e,h)} onPointerMove={rotateMove} onPointerUp={rotateEnd}
    onPointerCancel={e=>{const r=rotation.current;if(r?.pointer===e.pointerId){
-    rotation.current=null;if(r.moved)p.onDrag(r.edge,r.toPrice(r.originY),true,r.time);
+    rotation.current=null;if(r.moved)p.onDrag(r.edge,r.toPrice(r.originY),true,r.time,r.end);
    }}}
    onKeyDown={e=>{if(!geom.current||!['ArrowUp','ArrowDown'].includes(e.key))return;
-    e.preventDefault();p.onDrag(h.edge,geom.current.price(h.levelY+(e.key==='ArrowUp'?-4:4)),true,h.time);
+    e.preventDefault();p.onDrag(h.edge,geom.current.price(h.levelY+(e.key==='ArrowUp'?-4:4)),true,h.time,h.end);
    }}><RotateCw size={15} aria-hidden="true"/></button>)}
   {offset>0&&<button className="grid-return-chart" type="button" onClick={()=>setOffset(0)}>回到最新</button>}
  </div>;
