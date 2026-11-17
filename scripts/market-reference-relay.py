@@ -18,6 +18,7 @@ ORIGINS = {
     'coingecko': 'https://api.coingecko.com',
     'bybit': 'https://api.bybit.com',
     'binance_demo_public': 'https://demo-fapi.binance.com',
+    'grid_binance_public': 'https://fapi.binance.com',
 }
 
 
@@ -33,6 +34,26 @@ def allowed(provider, target):
     url = urlsplit(target)
     if url.scheme or url.netloc or url.fragment:
         return False
+    if provider=='grid_binance_public':
+        if url.path=='/fapi/v1/exchangeInfo':
+            return not url.query
+        if url.path not in ('/fapi/v1/klines','/fapi/v1/fundingRate'):
+            return False
+        try:
+            params=parse_qs(url.query, keep_blank_values=True, max_num_fields=5, strict_parsing=True)
+        except ValueError:
+            return False
+        keys={'symbol','startTime','endTime','limit'}
+        if url.path.endswith('/klines'):
+            keys.add('interval')
+            if params.get('interval') not in (['1m'],['5m'],['15m'],['1h']):
+                return False
+        if set(params)!=keys or any(len(value)!=1 for value in params.values()):
+            return False
+        start,end=params['startTime'][0],params['endTime'][0]
+        return (re.fullmatch(r'[A-Z0-9]{2,20}USDT',params['symbol'][0]) is not None and
+                params['limit']==['1000'] and re.fullmatch(r'[0-9]{13}',start) is not None and
+                re.fullmatch(r'[0-9]{13}',end) is not None and 0<int(end)-int(start)<=31*86400000)
     rules = {
         'blockmetric': (r'/v1/heatmap/[A-Z0-9]{1,20}', {'tf', 'hours'}),
         'marginpad': (r'/api/v1/liquidations/live', {'symbol', 'limit'}),

@@ -1,3 +1,4 @@
+import { gridMarket } from './grid-market';
 import { activeBinding, manageStrategy, readStrategy } from './strategy-center';
 import { armPrediction, cancelPrediction, createPrediction, deletePrediction, monitorPredictions, pathRelay, predictionHistory, predictionReference, predictionStatus } from './pathmatch-store';
 import { analyzeMarket } from './market-analyze';
@@ -48,6 +49,11 @@ if(p==='/api/market/analyze'&&m==='POST'){
   const principal=await auth(r,e,'read');
   await limit(e,'market-analysis:'+principal,16);
   return json(await analyzeMarket(e.DB,await body(r),c,e.MARKET_RELAY.get(e.MARKET_RELAY.idFromName('private-market-relay')),oiInterval,e.MARKET_SIGNAL_CONFIG,e.MARKET_CACHE_TTLS));
+}
+if(p==='/api/grid/market'&&m==='GET'){
+  const principal=await auth(r,e,'read',true);
+  await limit(e,'grid-market:'+principal,10);
+  return json(await gridMarket(u.searchParams,pathRelay(e.MARKET_RELAY)));
 }
 if(p.startsWith('/api/strategies/')){
   const op=p.split('/').at(-1)!;
