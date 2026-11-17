@@ -27,6 +27,27 @@ const fieldList=[
  ['fee','单边手续费 %'],['slip','滑点 %'],['maintenance','维持保证金率 %']
 ] as const;
 
+const decimalFormat=new Intl.NumberFormat('en-US',{useGrouping:false,maximumFractionDigits:20});
+function DecimalField({label,value,onValue,onCommit}:{label:string;value:number;onValue:(value:number)=>void;onCommit?:(value:number)=>void}){
+ const [draft,setDraft]=useState<string|null>(null);
+ const displayed=draft??decimalFormat.format(value);
+ return <label>{label}<input type="text" inputMode="decimal" value={displayed}
+  onFocus={e=>setDraft(e.currentTarget.value)}
+  onChange={e=>{
+   const next=e.currentTarget.value;
+   if(!/^\d*(?:\.\d*)?$/.test(next))return;
+   setDraft(next);
+   const parsed=Number(next);
+   if(next&&Number.isFinite(parsed))onValue(parsed);
+  }}
+  onBlur={()=>{
+   const parsed=Number(displayed);
+   if(!displayed)onValue(0);
+   if(Number.isFinite(parsed))onCommit?.(parsed);
+   setDraft(null);
+  }}/></label>;
+}
+
 function Facts({s,price}:{s:MartinSnapshot;price:(x:number|null)=>string}){
  return <dl className="martin-facts">
  {([['持仓数量',actualMoney(s.quantity)],['持仓均价',s.quantity?price(s.average):'—'],['保证金',actualMoney(s.margin)],
@@ -195,18 +216,17 @@ export default function MartinLab({api}:{api:Api}){
     <fieldset className="grid-side" disabled={loading}>
      <section className="grid-lab-card"><h3>已有空单</h3>
       <div className="grid-form">
-       {fieldList.map(([key,label])=><label key={key}>{label}<input type="number" step="any" value={config[key]||''}
-        onChange={e=>change(key,Number(e.target.value))}/></label>)}
+       {fieldList.map(([key,label])=><DecimalField key={key} label={label} value={config[key]} onValue={value=>change(key,value)}/>)}
        <label>压力涨幅<select value={config.shock} onChange={e=>change('shock',Number(e.target.value))}>
         {[10,20,30,50].map(v=><option key={v} value={v}>{v}%</option>)}</select></label>
-       <label>当前参考价<input type="number" min="0" step="any" value={mark||''} onChange={e=>setMark(Number(e.target.value))}/></label>
+       <DecimalField label="当前参考价" value={mark} onValue={setMark}/>
       </div>
       {analysis?.error&&<p role="alert" className="grid-error">{analysis.error}</p>}
      </section>
      <section className="grid-lab-card"><h3>补仓线</h3>
-      <div className="martin-triggers">{triggers.map((v,i)=><div key={i}><label>补仓 {i+1}<input type="number" min="0" step="any" value={v||''}
-       onChange={e=>{const n=Number(e.target.value);setTriggers(p=>p.map((price,j)=>i===j?n:price));if(replay)clear();}}
-       onBlur={e=>{if(Number(e.currentTarget.value)>0)level(i,Number(e.currentTarget.value));}}/></label>
+      <div className="martin-triggers">{triggers.map((v,i)=><div key={i}><DecimalField label={'补仓 '+(i+1)} value={v}
+       onValue={n=>{setTriggers(p=>p.map((price,j)=>i===j?n:price));if(replay)clear();}}
+       onCommit={n=>{if(n>0)level(i,n);}}/>
        <button type="button" aria-label={'删除补仓 '+(i+1)} onClick={()=>{setTriggers(p=>p.filter((_,j)=>j!==i));clear();}}>删除</button></div>)}</div>
       <button type="button" disabled={!calc||triggers.length>=config.maxAdds} onClick={propose}>添加补仓线</button>
       <label className="grid-check"><input type="checkbox" checked={precise} onChange={e=>setPrecise(e.target.checked)}/>优先使用 1m 历史回放</label>
